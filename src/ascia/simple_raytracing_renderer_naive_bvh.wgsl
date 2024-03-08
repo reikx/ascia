@@ -64,9 +64,13 @@ struct RaytracingSetting{
 @group(1) @binding(0) var<storage,read_write> rendered_chars: array<u32>;
 
 @group(2) @binding(0) var<storage,read> polygons: array<Polygon>;
+@group(2) @binding(1) var<storage,read_write> bvh_tree_polygons: array<mat2x3<f32>>;
+@group(2) @binding(2) var<storage,read_write> bvh_flag_polygons: array<u32>;
 @group(2) @binding(3) var<storage,read_write> intersections_polygons: array<PolygonRayIntersection>;
 
 @group(3) @binding(0) var<storage,read> c_particles: array<CParticle>;
+@group(3) @binding(1) var<storage,read_write> bvh_tree_c_particles: array<mat2x3<f32>>;
+@group(3) @binding(2) var<storage,read_write> bvh_flag_c_particles: array<u32>;
 @group(3) @binding(3) var<storage,read_write> intersections_c_particles: array<CParticleRayIntersection>;
 @group(3) @binding(4) var<storage,read_write> c_particle_counters: array<atomic<u32>>;
 
@@ -118,6 +122,174 @@ fn convert_rgbf32withpriority_to_rendered_char(data: vec4<f32>, c: u32) -> u32{
 }
 
 /*
+ * bvh
+ */
+
+@compute
+@workgroup_size(64,1,1)
+fn build_bvh_polygons(@builtin(global_invocation_id) global_id:vec3<u32>){
+    let polygon_id = global_id.x;
+    let n = arrayLength(&polygons);
+    let tree_width = 1u << (firstLeadingBit(n - 1u) + 1u);
+    var current_width = tree_width;
+    if(global_id.x >= tree_width){
+        return;
+    }
+
+    var node_index = current_width + global_id.x;
+    loop{
+        if(global_id.x >= current_width){
+            return;
+        }
+        let flag = bvh_flag_polygons[(node_index >> 1u)];
+        if(flag != 0u){
+            current_width >>= 6u;
+            node_index = current_width + global_id.x;
+        }
+        else{
+            break;
+        }
+    }
+
+    storageBarrier();
+
+    if(node_index >= tree_width){
+        bvh_tree_polygons[node_index][0] = min(polygons[polygon_id].vertices[0],min(polygons[polygon_id].vertices[1],polygons[polygon_id].vertices[2]));
+        bvh_tree_polygons[node_index][1] = max(polygons[polygon_id].vertices[0],max(polygons[polygon_id].vertices[1],polygons[polygon_id].vertices[2]));
+        bvh_flag_polygons[node_index] = 1u;
+    }
+
+    var i = 0u;
+    loop{
+        if(i == 6u){
+            return;
+        }
+        if (node_index == 1u) {
+            return;
+        }
+        let parent_index = node_index >> 1u;
+        if ((node_index & 1u) == 0u){
+            storageBarrier();
+            let flag1:bool = any(bvh_tree_polygons[node_index][0] != vec3<f32>() || bvh_tree_polygons[node_index][1] != vec3<f32>());
+            let flag2:bool = any(bvh_tree_polygons[(node_index ^ 1u)][0] != vec3<f32>() || bvh_tree_polygons[(node_index ^ 1u)][1] != vec3<f32>());
+
+            if (flag1){
+                if(flag2){
+                    bvh_tree_polygons[parent_index][0] = min(bvh_tree_polygons[node_index][0],bvh_tree_polygons[node_index ^ 1u][0]);
+                    bvh_tree_polygons[parent_index][1] = max(bvh_tree_polygons[node_index][1],bvh_tree_polygons[node_index ^ 1u][1]);
+                    bvh_flag_polygons[parent_index] |= 16u;
+                }
+                else{
+                    bvh_tree_polygons[parent_index] = bvh_tree_polygons[node_index];
+                    bvh_flag_polygons[parent_index] |= 32u;
+                }
+            }
+            else{
+                if(flag2){
+                    bvh_tree_polygons[parent_index] = bvh_tree_polygons[node_index ^ 1u];
+                    bvh_flag_polygons[parent_index] |= 64u;
+                }
+                else{
+                    bvh_flag_polygons[parent_index] |= 128u;
+                }
+            }
+
+            node_index = parent_index;
+        }
+        else{
+            return;
+        }
+        i += 1u;
+    }
+}
+
+@compute
+@workgroup_size(64,1,1)
+fn build_bvh_c_particles(@builtin(global_invocation_id) global_id:vec3<u32>){
+    let c_particle_id = global_id.x;
+    let n = arrayLength(&c_particles);
+    let tree_width = 1u << (firstLeadingBit(n - 1u) + 1u);
+    var current_width = tree_width;
+    if(global_id.x >= tree_width){
+        return;
+    }
+
+    var node_index = current_width + global_id.x;
+    loop{
+        if(global_id.x >= current_width){
+            return;
+        }
+        let flag = bvh_flag_c_particles[(node_index >> 1u)];
+        if(flag != 0u){
+            current_width >>= 6u;
+            node_index = current_width + global_id.x;
+        }
+        else{
+            break;
+        }
+    }
+
+    storageBarrier();
+
+    if(node_index >= tree_width){
+        let c_particle = c_particles[c_particle_id];
+        if(c_particle.mode == 0u){ //sphere
+            bvh_tree_c_particles[node_index][0] = c_particle.position - vec3<f32>(c_particle.threshold, c_particle.threshold, c_particle.threshold);
+            bvh_tree_c_particles[node_index][1] = c_particle.position + vec3<f32>(c_particle.threshold, c_particle.threshold, c_particle.threshold);
+        }
+        else if(c_particle.mode == 1u){
+            let r = length(c_particle.position - settings.camera_position) * tan(c_particle.threshold);
+            bvh_tree_c_particles[node_index][0] = c_particle.position - vec3<f32>(r, r, r);
+            bvh_tree_c_particles[node_index][1] = c_particle.position + vec3<f32>(r, r, r);
+        }
+        bvh_flag_c_particles[node_index] = 1u;
+    }
+
+    var i = 0u;
+    loop{
+        if(i == 6u){
+            return;
+        }
+        if (node_index == 1u) {
+            return;
+        }
+        let parent_index = node_index >> 1u;
+        if ((node_index & 1u) == 0u){
+            storageBarrier();
+            let flag1:bool = any(bvh_tree_c_particles[node_index][0] != vec3<f32>() || bvh_tree_c_particles[node_index][1] != vec3<f32>());
+            let flag2:bool = any(bvh_tree_c_particles[(node_index ^ 1u)][0] != vec3<f32>() || bvh_tree_c_particles[(node_index ^ 1u)][1] != vec3<f32>());
+
+            if (flag1){
+                if(flag2){
+                    bvh_tree_c_particles[parent_index][0] = min(bvh_tree_c_particles[node_index][0],bvh_tree_c_particles[node_index ^ 1u][0]);
+                    bvh_tree_c_particles[parent_index][1] = max(bvh_tree_c_particles[node_index][1],bvh_tree_c_particles[node_index ^ 1u][1]);
+                    bvh_flag_c_particles[parent_index] |= 16u;
+                }
+                else{
+                    bvh_tree_c_particles[parent_index] = bvh_tree_c_particles[node_index];
+                    bvh_flag_c_particles[parent_index] |= 32u;
+                }
+            }
+            else{
+                if(flag2){
+                    bvh_tree_c_particles[parent_index] = bvh_tree_c_particles[node_index ^ 1u];
+                    bvh_flag_c_particles[parent_index] |= 64u;
+                }
+                else{
+                    bvh_flag_c_particles[parent_index] |= 128u;
+                }
+            }
+
+            node_index = parent_index;
+        }
+        else{
+            return;
+        }
+        i += 1u;
+    }
+}
+
+/*
  * raycaster
  */
 
@@ -143,16 +315,54 @@ fn project_polygons(ray: Ray, exclude_polygon_id:u32) -> PolygonRayIntersection{
     let polygons_len = arrayLength(&polygons);
     var nearest_intersection = PolygonRayIntersection(2147483649u, settings.render_range_radius, ray, vec3<f32>(), vec2<f32>(), vec3<f32>());
 
-    var polygon_id = 0u;
+    var i = 1u;
+    let tree_width = 1u << (firstLeadingBit(polygons_len - 1u) + 1u);
+    var count = 0u;
+
     loop{
-        if (polygon_id >= polygons_len){
-            break;
+        count += 1u;
+        if(i >= (tree_width << 1u) || count >= 1048576u){
+            break; // just to prevent infinite loop
         }
-        let result = project_polygon(ray, polygon_id);
-        if (result.depth > 0.0 && result.depth < nearest_intersection.depth && polygon_id != exclude_polygon_id){
-            nearest_intersection = result;
+        let v0 = (bvh_tree_polygons[i][0] - ray.position) / ray.direction;
+        let v1 = (bvh_tree_polygons[i][1] - ray.position) / ray.direction;
+        let v_min = min(v0,v1);
+        let v_max = max(v0,v1);
+
+        if(any(v_min != v_max) && max(v_min[0],max(v_min[1],v_min[2])) <= min(v_max[0],min(v_max[1],v_max[2]))){
+            if(tree_width <= i){
+                let polygon_id = i - tree_width;
+                if (polygon_id < polygons_len){
+                    let result = project_polygon(ray, polygon_id);
+                    if (result.depth > 0.0 && result.depth < nearest_intersection.depth && polygon_id != exclude_polygon_id){
+                        nearest_intersection = result;
+                    }
+                }
+                if ((i & 1u) == 0u){
+                    i |= 1u;
+                }
+                else{
+                    i = (i + 1u) >> firstTrailingBit(i + 1u);
+                    if(i <= 1u){
+                        break;
+                    }
+                }
+            }
+            else{
+                i <<= 1u;
+            }
         }
-        polygon_id += 1u;
+        else{
+            if((i & 1u) == 0u){
+                i |= 1u;
+            }
+            else{
+                i = (i + 1u) >> firstTrailingBit(i + 1u);
+                if(i <= 1u){
+                    break;
+                }
+            }
+        }
     }
     return nearest_intersection;
 }
@@ -179,16 +389,54 @@ fn project_c_particles(ray: Ray, exclude_c_particle_id: u32) -> CParticleRayInte
     let c_particles_len = arrayLength(&c_particles);
     var nearest_intersection = CParticleRayIntersection(2147483649u, settings.render_range_radius, ray, vec3<f32>(), 0.0);
 
-    var c_particle_id = 1u;
+    var i = 1u;
+    let tree_width = 1u << (firstLeadingBit(c_particles_len - 1u) + 1u);
+    var count = 0u;
+
     loop{
-        if(c_particle_id >= c_particles_len){
-            break;
+        count += 1u;
+        if(i >= (tree_width << 1u) || count >= 1048576u){
+            break; // just to prevent infinite loop
         }
-        let result = project_c_particle(ray, c_particle_id);
-        if (result.depth > 0.0 && result.depth < nearest_intersection.depth && c_particle_id != exclude_c_particle_id){
-            nearest_intersection = result;
+        let v0 = (bvh_tree_c_particles[i][0] - ray.position) / ray.direction;
+        let v1 = (bvh_tree_c_particles[i][1] - ray.position) / ray.direction;
+        let v_min = min(v0,v1);
+        let v_max = max(v0,v1);
+
+        if(any(v_min != v_max) && max(v_min[0],max(v_min[1],v_min[2])) <= min(v_max[0],min(v_max[1],v_max[2]))){
+            if(tree_width <= i){
+                let c_particle_id = i - tree_width;
+                if (c_particle_id < c_particles_len){
+                    let result = project_c_particle(ray, c_particle_id);
+                    if (result.depth > 0.0 && result.depth < nearest_intersection.depth && c_particle_id != exclude_c_particle_id){
+                        nearest_intersection = result;
+                    }
+                }
+                if ((i & 1u) == 0u){
+                    i |= 1u;
+                }
+                else{
+                    i = (i + 1u) >> firstTrailingBit(i + 1u);
+                    if(i <= 1u){
+                        break;
+                    }
+                }
+            }
+            else{
+                i <<= 1u;
+            }
         }
-        c_particle_id += 1u;
+        else{
+            if((i & 1u) == 0u){
+                i |= 1u;
+            }
+            else{
+                i = (i + 1u) >> firstTrailingBit(i + 1u);
+                if(i <= 1u){
+                    break;
+                }
+            }
+        }
     }
     return nearest_intersection;
 }
@@ -303,7 +551,7 @@ fn calc_chars_3x(@builtin(global_invocation_id) global_id:vec3<u32>){
                 p_count += tmp;
                 color_sum += f32(tmp) * results[i];
             }
-            rendered_chars[index_1x] = convert_rgbf32withpriority_to_rendered_char(select(vec4<f32>(), color_sum / f32(p_count), p_count > 0u), char_mapper[seg]);
+             rendered_chars[index_1x] = convert_rgbf32withpriority_to_rendered_char(select(vec4<f32>(), color_sum / f32(p_count), p_count > 0u), char_mapper[seg]);
              /* if (p_count > 0u){
                  rendered_chars[index_1x] = 0x00ffff00u | 0x70u;
              } */

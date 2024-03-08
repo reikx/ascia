@@ -1,15 +1,40 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
-use crate::ascia::core::{ColorRGBf32, Entity, ObjectNode};
+use crate::ascia::color::ColorRGBf32;
+use crate::ascia::core::{Global, Light, ObjectNode, ObjectNodeAttribute, PresetLight, PresetObjectNodeAttribute};
 use crate::ascia::math::{Vec3};
 
-pub struct Light {
-    pub objn: Rc<RefCell<ObjectNode>>,
+pub struct PointLight {
     pub color: ColorRGBf32,
     pub power: f32
 }
 
+impl ObjectNodeAttribute for PointLight {
+    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+        return Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(PresetLight::Point(self))));
+    }
+}
+
+impl Light for PointLight{
+    fn ray(&self, node:&ObjectNode<Global>, to: &Vec3) -> ColorRGBf32 {
+        let distance = (*to - node.position).norm();
+        if distance == 0.0{
+            return ColorRGBf32 {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+            }
+        }
+        //let brightness = self.power / (distance * distance);
+        let brightness = self.power;
+        return ColorRGBf32 {
+            r: (self.color.r * brightness),
+            g: (self.color.g * brightness),
+            b: (self.color.b * brightness),
+        }
+    }
+}
+/*
 impl Light {
     pub fn new(color: ColorRGBf32, power:f32) -> Self{
         return Light {
@@ -17,15 +42,6 @@ impl Light {
             color:color,
             power:power
         }
-    }
-}
-
-impl Entity for Light {
-    fn repr<'a>(&'a self) -> &'a Rc<RefCell<ObjectNode>> {
-        return &self.objn;
-    }
-    fn update(&mut self,_d:&Duration) {
-
     }
 }
 
@@ -47,4 +63,4 @@ impl Light {
             b: (self.color.b * brightness),
         }
     }
-}
+} */

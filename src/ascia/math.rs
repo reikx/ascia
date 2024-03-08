@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 #[derive(Debug,Clone,Copy)]
 #[repr(C)]
 pub struct Vec2{
@@ -63,7 +65,7 @@ impl std::default::Default for Vec2{
 }
 
 impl Vec2{
-    pub(crate) fn norm(&self) -> f32{
+    pub fn norm(&self) -> f32{
         return f32::sqrt(self.x * self.x + self.y * self.y);
     }
 
@@ -77,8 +79,8 @@ impl Vec2{
 }
 
 
-#[derive(Debug,Clone,Copy)]
-#[repr(C,align(16))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
 pub struct Vec3{
     pub x:f32,
     pub y:f32,
@@ -169,7 +171,7 @@ impl std::default::Default for Vec3{
 }
 
 impl Vec3{
-    pub(crate) fn norm(&self) -> f32{
+    pub fn norm(&self) -> f32{
         return f32::sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
     }
 
@@ -188,7 +190,7 @@ impl Vec3{
     }
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone,Copy,PartialEq)]
 #[repr(C)]
 pub struct Vec4{
     pub w:f32,
@@ -240,28 +242,28 @@ impl std::ops::Sub<Vec4> for Vec4{
 }
 
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone,Copy,PartialEq)]
 #[repr(C)]
 pub struct Quaternion {
     pub vec4:Vec4
 }
 
 impl Quaternion{
-    pub fn new(axis:Vec3,deg:f32) -> Self{
-        let s = f32::sin(deg / 2.0);
-        let c = f32::cos(deg / 2.0);
+    pub fn new(axis: &Vec3, rad:f32) -> Self{
+        let s = f32::sin(rad / 2.0);
+        let c = f32::cos(rad / 2.0);
+        let a = axis.normalize();
         return Quaternion{
             vec4:Vec4{
                 w:c,
-                x:s * axis.x,
-                y:s * axis.y,
-                z:s * axis.z,
+                x:s * a.x,
+                y:s * a.y,
+                z:s * a.z,
             }
         }
     }
 
     pub fn rotate(&self,v:&Vec3) -> Vec3{
-        let c = self.conjugate();
         let res = (*self * Quaternion{
             vec4:Vec4{
                 w:0.0,
@@ -269,17 +271,64 @@ impl Quaternion{
                 y:v.y,
                 z:v.z
             }
-        }) * c;
+        }) * self.conjugate();
         return Vec3{
             x:res.vec4.x,
             y:res.vec4.y,
             z:res.vec4.z
-        }
+        };
     }
 
-    pub fn rotator(from:&Vec3,to:&Vec3) -> Self{
-        let axis = (*from ^ *to).normalize();
-        return Quaternion::new(axis,f32::acos((*from * *to) / (from.norm() * to.norm())));
+    pub fn rotator(from:&Vec3, to:&Vec3) -> Self{
+        let f = from.normalize();
+        let t = to.normalize();
+        let a = f ^ t;
+        let b = f * t;
+        let c = f * f;
+        if f32::abs(a.x) <= f32::EPSILON && f32::abs(a.y) <= f32::EPSILON && f32::abs(a.z) <= f32::EPSILON{
+            if b >= 0.0{
+                return Quaternion{
+                    vec4: Vec4 {
+                        w: 1.0,
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                }
+            }
+            
+            // gram schmidt orthonormalization
+            
+            let e1 = Vec3{
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            let v1 = e1 - (e1 * f) * f;
+            if f32::abs(v1.x) <= f32::EPSILON && f32::abs(v1.y) <= f32::EPSILON && f32::abs(v1.z) <= f32::EPSILON{
+                let e2 = Vec3{
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                };
+                let v2 = e2 - (e2 * f) * f;
+                return Quaternion::new(&v2, PI);
+            }
+            return Quaternion::new(&v1, PI);
+        } 
+        let d = (c + b) * (c + b);
+        let e = a * a;
+        let p = f32::sqrt(d / (d + e));
+        let q = f32::sqrt(1.0 / (d + e));
+        
+        return Quaternion{
+            vec4: Vec4 {
+                w: p,
+                x: q * a.x,
+                y: q * a.y,
+                z: q * a.z,
+            },
+        };
     }
 
     pub fn conjugate(&self) -> Self{
@@ -307,6 +356,119 @@ impl std::default::Default for Quaternion{
                 y:0.0,
                 z:0.0
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests{
+    use std::f32::consts::PI;
+    use crate::ascia::math::{Quaternion, Vec3};
+    
+    #[test]
+    pub fn test_rotate(){
+        {
+            let a = Vec3{
+                x: 1.0,
+                y: 3.0,
+                z: 2.0,
+            };
+            let b = Vec3{
+                x: 2.0,
+                y: 3.0,
+                z: -1.0,
+            };
+            let diff = Quaternion::new(&Vec3{
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            }, PI / 2.0).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON * 2.0);
+            assert!(f32::abs(diff.y) <= f32::EPSILON * 2.0);
+            assert!(f32::abs(diff.z) <= f32::EPSILON * 2.0);
+        }
+    }
+    #[test]
+    pub fn test_rotator(){
+        {
+            let a = Vec3{
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            let b = Vec3{
+                x: 0.0,
+                y: -1.0,
+                z: 0.0,
+            };
+            let diff = Quaternion::rotator(&a, &b).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON);
+            assert!(f32::abs(diff.y) <= f32::EPSILON);
+            assert!(f32::abs(diff.z) <= f32::EPSILON);
+        }
+        {
+            let a = Vec3{
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            };
+            let b = Vec3{
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            };
+            let diff = Quaternion::rotator(&a, &b).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON);
+            assert!(f32::abs(diff.y) <= f32::EPSILON);
+            assert!(f32::abs(diff.z) <= f32::EPSILON);
+        }
+        {
+            let a = Vec3{
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            let b = Vec3{
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            };
+            let diff = Quaternion::rotator(&a, &b).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON);
+            assert!(f32::abs(diff.y) <= f32::EPSILON);
+            assert!(f32::abs(diff.z) <= f32::EPSILON);
+        }
+        {
+            let a = Vec3{
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            };
+            let b = Vec3{
+                x: 1.0,
+                y: 0.0,
+                z: 1.0,
+            };
+            let diff = Quaternion::rotator(&a, &b).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON);
+            assert!(f32::abs(diff.y) <= f32::EPSILON);
+            assert!(f32::abs(diff.z) <= f32::EPSILON);
+        }
+        {
+            let a = Vec3{
+                x: 1.0,
+                y: 1.0,
+                z: -2.0,
+            };
+            let b = Vec3{
+                x: 1.0,
+                y: -2.0,
+                z: 1.0,
+            };
+            let diff = Quaternion::rotator(&a, &b).rotate(&a) - b;
+            assert!(f32::abs(diff.x) <= f32::EPSILON);
+            assert!(f32::abs(diff.y) <= f32::EPSILON);
+            assert!(f32::abs(diff.z) <= f32::EPSILON);
         }
     }
 }
@@ -350,8 +512,8 @@ impl std::ops::Mul<Quaternion> for Quaternion{
                 y:
                 self.vec4.w * rhs.vec4.y
                     + self.vec4.y * rhs.vec4.w
-                    - self.vec4.x * rhs.vec4.z
-                    + self.vec4.z * rhs.vec4.x,
+                    + self.vec4.z * rhs.vec4.x 
+                    - self.vec4.x * rhs.vec4.z,
                 z:
                 self.vec4.w * rhs.vec4.z
                     + self.vec4.z * rhs.vec4.w
@@ -479,3 +641,57 @@ impl Matrix33 {
         }
     }
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct AABB3D{
+    pub(crate) a: Vec3,
+    pub(crate) b: Vec3,
+}
+
+impl AABB3D{
+    pub fn generate_2(a: &Vec3, b: &Vec3) -> Self{
+        return AABB3D{
+            a: Vec3{
+                x: f32::min(a.x, b.x),
+                y: f32::min(a.y, b.y),
+                z: f32::min(a.z, b.z),
+            },
+            b: Vec3{
+                x: f32::max(a.x, b.x),
+                y: f32::max(a.y, b.y),
+                z: f32::max(a.z, b.z),
+            },
+        } 
+    }
+    
+    pub fn generate_3(a: &Vec3, b: &Vec3, c: &Vec3) -> Self{
+        return AABB3D{
+            a: Vec3{
+                x: f32::min(a.x, f32::min(b.x, c.x)),
+                y: f32::min(a.y, f32::min(b.y, c.y)),
+                z: f32::min(a.z, f32::min(b.z, c.z)),
+            },
+            b: Vec3{
+                x: f32::max(a.x, f32::max(b.x, c.x)),
+                y: f32::max(a.y, f32::max(b.y, c.y)),
+                z: f32::max(a.z, f32::max(b.z, c.z)),
+            },
+        };
+    }
+    
+    pub fn concat(lhs: &AABB3D, rhs: &AABB3D) -> AABB3D{
+        return AABB3D{
+            a: Vec3{
+                x: f32::min(lhs.a.x, rhs.a.x),
+                y: f32::min(lhs.a.y, rhs.a.y),
+                z: f32::min(lhs.a.z, rhs.a.z),
+            },
+            b: Vec3{
+                x: f32::max(lhs.b.x, rhs.b.x),
+                y: f32::max(lhs.b.y, rhs.b.y),
+                z: f32::max(lhs.b.z, rhs.b.z),
+            },
+        }
+    }
+}
+
