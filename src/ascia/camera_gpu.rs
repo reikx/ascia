@@ -293,7 +293,7 @@ impl GPUWrapper<SimpleCamera>{
 
 
 impl ObjectNodeAttribute for GPUWrapper<SimpleCamera> {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::SimpleGPU(self))));
     }
 }
@@ -709,7 +709,7 @@ impl GPUWrapper<SimpleBVHCamera>{
 }
 
 impl ObjectNodeAttribute for GPUWrapper<SimpleBVHCamera> {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::SimpleBVHGPU(self))));
     }
 }

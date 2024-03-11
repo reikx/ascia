@@ -12,6 +12,22 @@ use crate::ascia::color::{Color8bit, ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 use crate::ascia::math::{AABB3D, Matrix33, Quaternion, Vec2, Vec3};
 
+pub trait AsciaEnvironment{
+    type Materials;
+    type Cameras;
+    type ObjectNodeAttributes;
+}
+
+pub struct PresetAsciaEnvironment{
+    
+}
+
+impl AsciaEnvironment for PresetAsciaEnvironment{
+    type Materials = PresetMaterial;
+    type Cameras = PresetCamera;
+    type ObjectNodeAttributes = PresetObjectNodeAttribute;
+}
+
 pub trait CoordinateType{}
 
 pub struct Local{}
@@ -353,7 +369,7 @@ pub enum PresetObjectNodeAttribute {
 }
 
 pub trait ObjectNodeAttribute{
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>>;
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>>;
 }
 
 pub trait Camera: ObjectNodeAttribute{
@@ -464,7 +480,7 @@ pub enum PresetLight{
 }
 
 impl ObjectNodeAttribute for PresetCamera {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(self)));
     }
 }
@@ -481,7 +497,7 @@ impl Camera for PresetCamera{
 }
 
 impl ObjectNodeAttribute for PresetLight {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(self)));
     }
 }
@@ -685,7 +701,7 @@ mod tests{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            }, PI / 2.0
+            }, PI / 2.0, 1.0
         );
         let b_pos_local = Vec3{
             x: 2.0,
@@ -701,7 +717,7 @@ mod tests{
             x: 0.0,
             y: 0.0,
             z: 1.0,
-        }, PI * 0.5);
+        }, PI * 0.5, 1.0);
         let d_pos_local = Vec3{
             x: 2.0,
             y: -2.0,

@@ -35,7 +35,7 @@ fn main() {
         x: 0.0,
         y: 1.0,
         z: 0.0,
-    }, -PI * 0.5);
+    }, -PI * 0.5, 1.0);
     cam_objn.attribute = cameras[now_camera_index].clone();
 
     engine.genesis_local.add_child(cam_objn);
@@ -69,7 +69,7 @@ fn main() {
             b: 255
         }.into(),
         power: 1.0,
-    }.make_attribute();
+    }.make_attribute_enum();
     engine.genesis_local.add_child(light_objn);
 
     let mut input = create_stdin_controller().unwrap();
@@ -120,16 +120,16 @@ fn available_cameras(engine: &AsciaEngine) -> Vec<Rc<RefCell<PresetObjectNodeAtt
     let aov = (PI / 3.0, PI / 4.0);
 
     let mut cameras = vec![
-        SimpleCamera::new(aov, 1).make_attribute(),
-        SimpleBVHCamera::new(aov, 1).make_attribute(),
-        SimpleCamera::new(aov, 3).make_attribute(),
-        SimpleBVHCamera::new(aov, 3).make_attribute(),
+        SimpleCamera::new(aov, 1).make_attribute_enum(),
+        SimpleBVHCamera::new(aov, 1).make_attribute_enum(),
+        SimpleCamera::new(aov, 3).make_attribute_enum(),
+        SimpleBVHCamera::new(aov, 3).make_attribute_enum(),
     ];
     if engine.wgpu_daq.is_some(){
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute());
+        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum());
     }
     return cameras;
 }
@@ -190,28 +190,28 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
-            },rotation_speed);
+            },rotation_speed, 1.0);
         }
         else if *c == b'k'{
             cam_objn.direction = d * Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
-            },-rotation_speed);
+            },-rotation_speed, 1.0);
         }
         else if *c == b'j'{
             cam_objn.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            },-rotation_speed) * d;
+            },-rotation_speed, 1.0) * d;
         }
         else if *c == b'l'{
             cam_objn.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            },rotation_speed) * d;
+            },rotation_speed, 1.0) * d;
         }
         else if *c == b'v'{
             *now_camera_index = if *now_camera_index + 1 >= cameras.len() { 0 } else { *now_camera_index + 1 };

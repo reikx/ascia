@@ -35,7 +35,7 @@ fn main() {
         x: 0.0,
         y: 1.0,
         z: 0.0,
-    }, -PI * 0.5);
+    }, -PI * 0.5, 1.0);
     
     engine.genesis_local.add_child(cam_objn);
     
@@ -138,7 +138,7 @@ fn main() {
         x:0.0,
         y:1.0,
         z:0.0
-    },-PI * 0.5);
+    },-PI * 0.5, 1.0);
     null_container.add_child(green_square);
 
     let mut blue_square = ObjectNode::from("blue square", PrimitiveGenerator::square(20.0,PresetMaterial::LambertWithShadow(
@@ -168,7 +168,7 @@ fn main() {
             x:0.0,
             y:1.0,
             z:0.0
-        }.normalize(),(i as f32) * 0.3).rotate(&Vec3{
+        }.normalize(),(i as f32) * 0.3, 1.0).rotate(&Vec3{
             x:60.0,
             y:0.0,
             z:0.0
@@ -212,11 +212,11 @@ fn main() {
                 x:1.0,
                 y:0.0,
                 z:0.0
-            },1.00) * Quaternion::new(&Vec3{
+            },1.0, 1.0) * Quaternion::new(&Vec3{
                 x:0.0,
                 y:1.0,
                 z:0.0
-            },(d.as_millis() as f32) / 5000.0 * 2.0 * PI);
+            },(d.as_millis() as f32) / 5000.0 * 2.0 * PI, 1.0);
         }
         {
             let mut cube_1 = engine.genesis_local.child_mut("null container").unwrap().child_mut("cube 1").unwrap();
@@ -225,7 +225,7 @@ fn main() {
                 x:1.0,
                 y:1.0,
                 z:1.0
-            }.normalize(),(d.as_millis() as f32) / 2000.0 * 2.0 * PI);
+            }.normalize(),(d.as_millis() as f32) / 2000.0 * 2.0 * PI, 1.0);
         }
         {
             let mut cube_2 = engine.genesis_local.child_mut("null container").unwrap().child_mut("cube 1").unwrap();
@@ -234,7 +234,7 @@ fn main() {
                 x:1.0,
                 y:0.0,
                 z:1.0
-            }.normalize(),(d.as_millis() as f32) / 3000.0 * 2.0 * PI);
+            }.normalize(),(d.as_millis() as f32) / 3000.0 * 2.0 * PI, 1.0);
         }
         {
             let mut blue_square = engine.genesis_local.child_mut("null container").unwrap().child_mut("blue square").unwrap();
@@ -242,7 +242,7 @@ fn main() {
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            },(d.as_millis() as f32) / 2500.0 * 2.0 * PI);
+            },(d.as_millis() as f32) / 2500.0 * 2.0 * PI, 1.0);
         }
         
         move_camera(engine.genesis_local.child_mut("camera").unwrap(),&mut input,3.0,0.1, &cameras, &mut now_camera_index);
@@ -288,16 +288,16 @@ fn available_cameras(engine: &AsciaEngine) -> Vec<Rc<RefCell<PresetObjectNodeAtt
     let aov = (PI / 3.0, PI / 4.0);
 
     let mut cameras = vec![
-        SimpleCamera::new(aov, 1).make_attribute(),
-        SimpleBVHCamera::new(aov, 1).make_attribute(),
-        SimpleCamera::new(aov, 3).make_attribute(),
-        SimpleBVHCamera::new(aov, 3).make_attribute(),
+        SimpleCamera::new(aov, 1).make_attribute_enum(),
+        SimpleBVHCamera::new(aov, 1).make_attribute_enum(),
+        SimpleCamera::new(aov, 3).make_attribute_enum(),
+        SimpleBVHCamera::new(aov, 3).make_attribute_enum(),
     ];
     if engine.wgpu_daq.is_some(){
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute());
+        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum());
     }
     return cameras;
 }
@@ -358,28 +358,28 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
-            },rotation_speed);
+            } ,rotation_speed, 1.0);
         }
         else if *c == b'k'{
             cam_objn.direction = d * Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
-            },-rotation_speed);
+            },-rotation_speed, 1.0);
         }
         else if *c == b'j'{
             cam_objn.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            },-rotation_speed) * d;
+            }, -rotation_speed, 1.0) * d;
         }
         else if *c == b'l'{
             cam_objn.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            },rotation_speed) * d;
+            }, rotation_speed, 1.0) * d;
         }
         else if *c == b'v'{
             *now_camera_index = if *now_camera_index + 1 >= cameras.len() { 0 } else { *now_camera_index + 1 };

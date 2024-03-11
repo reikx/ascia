@@ -127,7 +127,7 @@ impl SimpleCamera{
 
 
 impl ObjectNodeAttribute for SimpleCamera {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::Simple(self))));
     }
 }
@@ -146,6 +146,7 @@ impl Camera for SimpleCamera{
 
         for iter in engine.genesis_global.iter(){
             global_polygons.extend(iter.polygons.clone());
+            global_c_particles.extend(iter.c_particles.clone());
             global_c_particles.extend(iter.c_particles.clone());
         }
 
@@ -233,38 +234,41 @@ impl Camera for SimpleCamera{
 
             for x in 0..width{
                 for y in 0..height{
-                    let mut max_priority = 0;
                     let mut material_results:[(ColorRGBf32, u32);8] = [(Default::default(),0);8];
                     let mut k = 0;
-                    
-                    for i in 0..3 {
-                        for j in 0..3 {
-                            if let Some(r) = &polygon_intersections[x * 3 + j][y * 3 + i]{
-                                material_results[k] = <PresetMaterial as Material<SimpleCamera, &Polygon<Global>>>::calc_color(&r.polygon.material, r, engine, self, node, &global_polygons);
-                                if max_priority < material_results[k].1{
-                                    max_priority = material_results[k].1;
-                                }
-                            }
-                        }
-                    }
 
-                    let mut color_sum: ColorRGBf32 = ColorRGBf32::default();
-                    let mut depth_sum: f32 = 0.0;
+                    let mut max_priority = 0;
+                    let mut color_sum: ColorRGBf32 = ColorRGBf32{
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                    };
                     let mut seg:usize = 0;
                     let mut seg_count:u32 = 0;
 
-                    for i in 0..3{
-                        for j in 0..3{
-                            if i == 1 && j == 1{
+                    for i in 0..3 {
+                        for j in 0..3 {
+                            if i == 1 && j == 1 {
                                 continue;
                             }
                             seg <<= 1;
-                            if let Some(intersection) = &polygon_intersections[x * 3 + j][y * 3 + i]{
+                            if let Some(r) = &polygon_intersections[x * 3 + j][y * 3 + i] {
+                                material_results[k] = <PresetMaterial as Material<SimpleCamera, &Polygon<Global>>>::calc_color(&r.polygon.material, r, engine, self, node, &global_polygons);
+                                if max_priority < material_results[k].1{
+                                    max_priority = material_results[k].1;
+                                    seg = 0;
+                                    seg_count = 0;
+                                    color_sum = ColorRGBf32{
+                                        r: 0.0,
+                                        g: 0.0,
+                                        b: 0.0
+                                    };
+                                }
                                 color_sum += material_results[k].0;
-                                depth_sum += intersection.depth;
                                 seg |= 1;
                                 seg_count += 1;
                             }
+                            k += 1;
                         }
                     }
 
@@ -486,7 +490,7 @@ impl SimpleBVHCamera{
 }
 
 impl ObjectNodeAttribute for SimpleBVHCamera{
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::SimpleBVH(self))));
     }
 }
@@ -595,39 +599,44 @@ impl Camera for SimpleBVHCamera{
 
             for x in 0..width{
                 for y in 0..height{
-                    let mut max_priority = 0;
                     let mut material_results:[(ColorRGBf32, u32);8] = [(Default::default(),0);8];
                     let mut k = 0;
-
-                    for i in 0..3 {
-                        for j in 0..3 {
-                            if let Some(r) = &polygon_intersections[x * 3 + j][y * 3 + i]{
-                                material_results[k] = <PresetMaterial as Material<SimpleBVHCamera, &Polygon<Global>>>::calc_color(&r.polygon.material, r, engine, self, node, &polygons_bvh_tree.data);
-                                if max_priority < material_results[k].1{
-                                    max_priority = material_results[k].1;
-                                }
-                            }
-                        }
-                    }
-
-                    let mut color_sum: ColorRGBf32 = ColorRGBf32::default();
+                    
+                    let mut max_priority = 0;
+                    let mut color_sum: ColorRGBf32 = ColorRGBf32{
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                    };
                     let mut seg:usize = 0;
                     let mut seg_count:u32 = 0;
 
-                    for i in 0..3{
-                        for j in 0..3{
-                            if i == 1 && j == 1{
+                    for i in 0..3 {
+                        for j in 0..3 {
+                            if i == 1 && j == 1 {
                                 continue;
                             }
                             seg <<= 1;
-                            if polygon_intersections[x * 3 + j][y * 3 + i].is_some(){
+                            if let Some(r) = &polygon_intersections[x * 3 + j][y * 3 + i] {
+                                material_results[k] = <PresetMaterial as Material<SimpleBVHCamera, &Polygon<Global>>>::calc_color(&r.polygon.material, r, engine, self, node, &polygons_bvh_tree.data);
+                                if max_priority < material_results[k].1{
+                                    max_priority = material_results[k].1;
+                                    seg = 0;
+                                    seg_count = 0;
+                                    color_sum = ColorRGBf32{
+                                        r: 0.0,
+                                        g: 0.0,
+                                        b: 0.0
+                                    };
+                                }
                                 color_sum += material_results[k].0;
                                 seg |= 1;
                                 seg_count += 1;
                             }
+                            k += 1;
                         }
                     }
-
+                    
                     output[y][x].c = charmapper::CHARMAP3X3[seg];
                     output[y][x].color = if seg_count == 0 {
                         ColorRGBu8::default()

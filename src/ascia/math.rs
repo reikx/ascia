@@ -249,18 +249,22 @@ pub struct Quaternion {
 }
 
 impl Quaternion{
-    pub fn new(axis: &Vec3, rad:f32) -> Self{
+    pub fn new(axis: &Vec3, rad:f32, scale: f32) -> Self{
         let s = f32::sin(rad / 2.0);
         let c = f32::cos(rad / 2.0);
         let a = axis.normalize();
         return Quaternion{
             vec4:Vec4{
-                w:c,
-                x:s * a.x,
-                y:s * a.y,
-                z:s * a.z,
+                w:c * scale,
+                x:s * a.x * scale,
+                y:s * a.y * scale,
+                z:s * a.z * scale,
             }
         }
+    }
+    
+    pub fn norm(&self) -> f32{
+        return self.vec4.norm();
     }
 
     pub fn rotate(&self,v:&Vec3) -> Vec3{
@@ -272,10 +276,11 @@ impl Quaternion{
                 z:v.z
             }
         }) * self.conjugate();
+        let d = self.norm();
         return Vec3{
-            x:res.vec4.x,
-            y:res.vec4.y,
-            z:res.vec4.z
+            x:res.vec4.x / d,
+            y:res.vec4.y / d,
+            z:res.vec4.z / d
         };
     }
 
@@ -296,9 +301,9 @@ impl Quaternion{
                     },
                 }
             }
-            
+
             // gram schmidt orthonormalization
-            
+
             let e1 = Vec3{
                 x: 1.0,
                 y: 0.0,
@@ -312,15 +317,15 @@ impl Quaternion{
                     z: 0.0,
                 };
                 let v2 = e2 - (e2 * f) * f;
-                return Quaternion::new(&v2, PI);
+                return Quaternion::new(&v2, PI, 1.0);
             }
-            return Quaternion::new(&v1, PI);
-        } 
+            return Quaternion::new(&v1, PI, 1.0);
+        }
         let d = (c + b) * (c + b);
         let e = a * a;
         let p = f32::sqrt(d / (d + e));
         let q = f32::sqrt(1.0 / (d + e));
-        
+
         return Quaternion{
             vec4: Vec4 {
                 w: p,
@@ -364,7 +369,7 @@ impl std::default::Default for Quaternion{
 mod tests{
     use std::f32::consts::PI;
     use crate::ascia::math::{Quaternion, Vec3};
-    
+
     #[test]
     pub fn test_rotate(){
         {
@@ -382,7 +387,7 @@ mod tests{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            }, PI / 2.0).rotate(&a) - b;
+            }, PI / 2.0, 1.0).rotate(&a) - b;
             assert!(f32::abs(diff.x) <= f32::EPSILON * 2.0);
             assert!(f32::abs(diff.y) <= f32::EPSILON * 2.0);
             assert!(f32::abs(diff.z) <= f32::EPSILON * 2.0);
@@ -512,7 +517,7 @@ impl std::ops::Mul<Quaternion> for Quaternion{
                 y:
                 self.vec4.w * rhs.vec4.y
                     + self.vec4.y * rhs.vec4.w
-                    + self.vec4.z * rhs.vec4.x 
+                    + self.vec4.z * rhs.vec4.x
                     - self.vec4.x * rhs.vec4.z,
                 z:
                 self.vec4.w * rhs.vec4.z

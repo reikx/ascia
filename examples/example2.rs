@@ -97,7 +97,7 @@ impl RollingCube {
             x: 0.0,
             y: 0.0,
             z: 1.0,
-        },theta - 0.75 * PI);
+        },theta - 0.75 * PI, 1.0);
     }
 
     fn decide_next(&mut self){
@@ -188,7 +188,7 @@ fn main() {
             x: 0.0,
             y: 0.0,
             z: 1.0,
-        }, PI * 0.5);
+        }, PI * 0.5, 1.0);
         engine.genesis_local.add_child(f);
         floors.push_back(FlashingFloor::new(cube_size, &label, engine.engine_time(), Duration::new(5,0)));
     }
@@ -205,11 +205,11 @@ fn main() {
         x: 0.0,
         y: 0.0,
         z: 1.0,
-    }, -cam_objn.position.y.atan2(-cam_objn.position.x)); 
+    }, -cam_objn.position.y.atan2(-cam_objn.position.x), 1.0); 
 
-    cam_objn.attribute = PresetCamera::SimpleGPU(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::default(), &engine)).make_attribute();
-    cam_objn.attribute = SimpleBVHCamera::default().make_attribute();
-    cam_objn.attribute = SimpleCamera::default().make_attribute();
+    cam_objn.attribute = PresetCamera::SimpleGPU(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::default(), &engine)).make_attribute_enum();
+    cam_objn.attribute = SimpleBVHCamera::default().make_attribute_enum();
+    cam_objn.attribute = SimpleCamera::default().make_attribute_enum();
 
     let mut cam_root = ObjectNode::new("camera root");
     cam_root.add_child(cam_objn);
@@ -223,7 +223,7 @@ fn main() {
             b: 1.0,
         },
         power: 1.4,
-    }.make_attribute();
+    }.make_attribute_enum();
     light_objn.position = Vec3{
         x: -50.0,
         y: 150.0,
@@ -248,7 +248,7 @@ fn main() {
                     x: 0.0,
                     y: 0.0,
                     z: 1.0,
-                }, PI * 0.5);
+                }, PI * 0.5, 1.0);
                 engine.genesis_local.add_child(f);
                 floors.push_back(FlashingFloor::new(cube_size, &label, engine.engine_time(), Duration::new(3,0)));
             }
@@ -274,7 +274,7 @@ fn main() {
             x: 0.0,
             y: 1.0,
             z: 0.0,
-        }, engine_time.as_secs_f32());
+        }, engine_time.as_secs_f32(), 1.0);
 
         engine.update_global_nodes();
         engine.render(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap());

@@ -10,7 +10,7 @@ pub struct PointLight {
 }
 
 impl ObjectNodeAttribute for PointLight {
-    fn make_attribute(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
+    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(PresetLight::Point(self))));
     }
 }
