@@ -8,7 +8,7 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
 use crate::ascia::charmapper::CHARMAP3X3;
 use crate::ascia::color::{ColorRGBf32, ColorRGBu8};
-use crate::ascia::core::{AsciaEngine, Camera, CParticle, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, ObjectNode, PresetObjectNodeAttribute, Polygon, PresetLight, PresetMaterial, RenderChar, ObjectNodeAttribute, PresetCamera};
+use crate::ascia::core::{AsciaEngine, Camera, CParticle, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, ObjectNode, PresetObjectNodeAttribute, Polygon, PresetLight, PresetMaterial, RenderChar, ObjectNodeAttribute, PresetCamera, AsciaEnvironment, PresetAsciaEnvironment, Material};
 use crate::ascia::core::CParticleMode::SPHERE;
 use crate::ascia::lights::PointLight;
 use crate::ascia::math::{Matrix33, Quaternion, Vec3, Vec4};
@@ -157,7 +157,7 @@ impl GPUMemoryConvertStatic<20> for PresetMaterial{
     }
 }
 
-impl GPUMemoryConvertStatic<80> for Polygon<Global>{
+impl<E: AsciaEnvironment> GPUMemoryConvertStatic<80> for Polygon<Global, E> where (E::Materials): GPUMemoryConvertStatic<20>{
     #[inline]
     fn convert(&self) -> [u8; 80] {
         let mut buf:[u8; 80] = [0; 80];
@@ -167,7 +167,7 @@ impl GPUMemoryConvertStatic<80> for Polygon<Global>{
     }
 }
 
-impl GPUMemoryConvertStatic<64> for CParticle<Global>{
+impl<E: AsciaEnvironment> GPUMemoryConvertStatic<64> for CParticle<Global, E>{
     #[inline]
     fn convert(&self) -> [u8; 64] {
         let mut buf:[u8; 64] = [0; 64];
@@ -266,14 +266,15 @@ impl GPUMemoryConvertStatic<64> for RaytracingSetting{
     }
 }
 
-pub struct GPUWrapper<C:Camera>{
+pub struct GPUWrapper<C:Camera<E>, E: AsciaEnvironment>{
     pub cpu_camera: C,
     shader: ShaderModule,
-    _ph: PhantomData<C>
+    _ph: PhantomData<C>,
+    _phe: PhantomData<E>
 }
 
-impl GPUWrapper<SimpleCamera>{
-    pub fn generate(value: SimpleCamera, engine: &AsciaEngine) -> Self {
+impl<E: AsciaEnvironment> GPUWrapper<SimpleCamera, E> where SimpleCamera: Camera<E>{
+    pub fn generate(value: SimpleCamera, engine: &AsciaEngine<E>) -> Self {
         let daq = if let Some(d) = &engine.wgpu_daq{
             d
         } else {
@@ -286,20 +287,21 @@ impl GPUWrapper<SimpleCamera>{
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("simple_raytracing_renderer.wgsl")))
             }),
-            _ph: Default::default()
+            _ph: Default::default(),
+            _phe: Default::default(),
         };
     }
 }
 
 
-impl ObjectNodeAttribute for GPUWrapper<SimpleCamera> {
+impl ObjectNodeAttribute<PresetAsciaEnvironment> for GPUWrapper<SimpleCamera, PresetAsciaEnvironment> where SimpleCamera: Camera<PresetAsciaEnvironment>{
     fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::SimpleGPU(self))));
     }
 }
 
-impl Camera for GPUWrapper<SimpleCamera>{
-    fn render(&self, node: &ObjectNode<Global>, engine: &AsciaEngine) -> Vec<Vec<RenderChar>> {
+impl Camera<PresetAsciaEnvironment> for GPUWrapper<SimpleCamera, PresetAsciaEnvironment>{
+    fn render(&self, node: &ObjectNode<Global, PresetAsciaEnvironment>, engine: &AsciaEngine<PresetAsciaEnvironment>) -> Vec<Vec<RenderChar>> {
         let daq = if let Some(d) = &engine.wgpu_daq{
             d
         } else {
@@ -347,13 +349,14 @@ impl Camera for GPUWrapper<SimpleCamera>{
         for iter in engine.genesis_global.iter(){
             polygons.extend(iter.polygons.clone());
             c_particles.extend(iter.c_particles.clone());
-            let attr_rr = RefCell::borrow(&iter.attribute);
-            if let PresetObjectNodeAttribute::Light(light) = &*attr_rr{
-                if let PresetLight::Point(p) = light{
-                    pointlights.push((iter.position, PointLight{
-                        color: p.color,
-                        power: p.power,
-                    }));
+            if let Some(attr_rrr) = &iter.attribute{
+                if let PresetObjectNodeAttribute::Light(light) = &*attr_rrr.borrow(){
+                    if let PresetLight::Point(p) = light{
+                        pointlights.push((iter.position, PointLight{
+                            color: p.color,
+                            power: p.power,
+                        }));
+                    }
                 }
             }
         }
@@ -373,6 +376,7 @@ impl Camera for GPUWrapper<SimpleCamera>{
                 threshold: 0.0,
                 mode: SPHERE,
                 _ph: Default::default(),
+                _phe: Default::default(),
             });
         }
 
@@ -465,7 +469,7 @@ impl Camera for GPUWrapper<SimpleCamera>{
             });
 
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("ASCIA") });
-            
+
             let calc_intersections_polygons_pipeline = match self.cpu_camera.sampling_size {
                 1 => {&calc_intersections_polygons_1x_pipeline }
                 3 => {&calc_intersections_polygons_3x_pipeline }
@@ -689,8 +693,8 @@ impl Camera for GPUWrapper<SimpleCamera>{
     }
 }
 
-impl GPUWrapper<SimpleBVHCamera>{
-    pub fn generate(value: SimpleBVHCamera, engine: &AsciaEngine) -> Self {
+impl<E: AsciaEnvironment> GPUWrapper<SimpleBVHCamera<E>, E> where SimpleBVHCamera<E>: ObjectNodeAttribute<E>{
+    pub fn generate(value: SimpleBVHCamera<E>, engine: &AsciaEngine<E>) -> Self {
         let daq = if let Some(d) = &engine.wgpu_daq{
             d
         } else {
@@ -698,24 +702,26 @@ impl GPUWrapper<SimpleBVHCamera>{
         };
         let device = &daq.0;
         return GPUWrapper{
+            
             cpu_camera: value,
             shader: device.create_shader_module(ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("simple_raytracing_renderer_naive_bvh.wgsl")))
             }),
-            _ph: Default::default()
+            _ph: Default::default(),
+            _phe: Default::default(),
         };
     }
 }
 
-impl ObjectNodeAttribute for GPUWrapper<SimpleBVHCamera> {
+impl ObjectNodeAttribute<PresetAsciaEnvironment> for GPUWrapper<SimpleBVHCamera<PresetAsciaEnvironment>,PresetAsciaEnvironment> {
     fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
         return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(PresetCamera::SimpleBVHGPU(self))));
     }
 }
 
-impl Camera for GPUWrapper<SimpleBVHCamera>{
-    fn render(&self, node: &ObjectNode<Global>, engine: &AsciaEngine) -> Vec<Vec<RenderChar>> {
+impl Camera<PresetAsciaEnvironment> for GPUWrapper<SimpleBVHCamera<PresetAsciaEnvironment>, PresetAsciaEnvironment>{
+    fn render(&self, node: &ObjectNode<Global, PresetAsciaEnvironment>, engine: &AsciaEngine<PresetAsciaEnvironment>) -> Vec<Vec<RenderChar>> {
         let daq = if let Some(d) = &engine.wgpu_daq{
             d
         } else {
@@ -775,13 +781,14 @@ impl Camera for GPUWrapper<SimpleBVHCamera>{
         for iter in engine.genesis_global.iter(){
             polygons.extend(iter.polygons.clone());
             c_particles.extend(iter.c_particles.clone());
-            let attr_rr = RefCell::borrow(&iter.attribute);
-            if let PresetObjectNodeAttribute::Light(light) = &*attr_rr{
-                if let PresetLight::Point(p) = light{
-                    pointlights.push((iter.position, PointLight{
-                        color: p.color,
-                        power: p.power,
-                    }));
+            if let Some(attr_rrr) = &iter.attribute{
+                if let PresetObjectNodeAttribute::Light(light) = &*attr_rrr.borrow(){
+                    if let PresetLight::Point(p) = light{
+                        pointlights.push((iter.position, PointLight{
+                            color: p.color,
+                            power: p.power,
+                        }));
+                    }
                 }
             }
         }
@@ -801,6 +808,7 @@ impl Camera for GPUWrapper<SimpleBVHCamera>{
                 threshold: 0.0,
                 mode: SPHERE,
                 _ph: Default::default(),
+                _phe: Default::default(),
             });
         }
 

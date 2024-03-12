@@ -1,12 +1,12 @@
-use crate::ascia::core::{Local, Polygon, PresetMaterial};
+use crate::ascia::core::{AsciaEnvironment, Local, Polygon, PresetMaterial};
 use crate::ascia::math::{Matrix33, Vec3};
 
 pub struct PrimitiveGenerator{
-
+    
 }
 
 impl PrimitiveGenerator {
-    pub fn square(size:f32,material:PresetMaterial) -> Vec<Polygon<Local>>{
+    pub fn square<E: AsciaEnvironment>(size:f32, material: E::Materials) -> Vec<Polygon<Local, E>>{
         let mut polygons = vec![];
         let p = size * 0.5;
         polygons.push(Polygon {
@@ -30,7 +30,7 @@ impl PrimitiveGenerator {
         return polygons;
     }
 
-    pub fn cube(size:f32,material:PresetMaterial) -> Vec<Polygon<Local>>{
+    pub fn cube<E: AsciaEnvironment>(size:f32,material: E::Materials) -> Vec<Polygon<Local, E>>{
         let mut polygons = vec![];
         let p = size * 0.5;
 
