@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ascia::ascia::camera::{NaiveBVH, SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::camera_gpu::GPUWrapper;
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{AsciaEngine, CParticle, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, Polygon, PresetCamera, PresetLight, PresetMaterial, PresetObjectNodeAttribute};
+use ascia::ascia::core::{AsciaEngine, CParticle, LambertMaterial, LambertWithShadowMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, Polygon, PresetCamera, PresetLight, PresetMaterial, PresetObjectNodeAttribute};
 use ascia::ascia::core::CParticleMode::SPHERE;
 use ascia::ascia::core::PresetObjectNodeAttribute::{Camera, Light};
 use ascia::ascia::lights::PointLight;
@@ -52,8 +52,8 @@ fn main() {
     };
 
     for i in 0..1{
-        let mut pot = ObjectNode::from(&format!("teapot {}", i), load_teapot("./examples/teapot_bezier1.tris.txt",&PresetMaterial::Lambert(
-            LambertMaterial{
+        let mut pot = ObjectNode::from(&format!("teapot {}", i), load_teapot("./examples/teapot_bezier1.tris.txt",&PresetMaterial::LambertWithShadow(
+            LambertWithShadowMaterial{
                 color: ColorRGBf32{
                     r: 1.0,
                     g: 1.0,
@@ -64,7 +64,7 @@ fn main() {
         )));
 
         pot.position = Vec3{
-            x: 40.0 * i as f32 - 20.0,
+            x: 0.0,
             y: 0.0,
             z: 0.0,
         }.rotate_by(&Quaternion::new(&Vec3{
@@ -108,6 +108,11 @@ fn main() {
 
     for _i in 0..65536 {
         engine.sync_engine_time();
+        engine.genesis_local.child_mut("null container").unwrap().direction = Quaternion::new(&Vec3{
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        }, engine.engine_time().as_secs_f32(), 1.0);
 
         move_camera(engine.genesis_local.child_mut("camera").unwrap(),&mut input,2.0,0.1, &cameras, &mut now_camera_index);
         engine.genesis_global = engine.genesis_local.generate_global_nodes();
