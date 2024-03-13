@@ -1,0 +1,1 @@
+ffmpeg -i input.mov -vf "fps=10,scale=720:-1,split[s0][s1];[s0]palettegen=max_colors=32[p];[s1][p]paletteuse=dither=bayer" ./gif/output.gif

@@ -1,5 +1,5 @@
 # Ascia
-Ascia is a lightweight framework designed for creating 3D computer graphics applications that operate within a terminal environment.
+Ascia is a lightweight hobby framework designed for creating 3D computer graphics applications that operate within a terminal environment.
 
 ## Examples
 To run the examples, use the following command:
