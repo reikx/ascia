@@ -865,7 +865,6 @@ pub trait Viewport{
 pub struct ViewportStdout<'a>{
     width:usize,
     height:usize,
-    buf:Vec<Vec<String>>,
     out:BufWriter<StdoutLock<'a>>
 }
 
@@ -879,47 +878,25 @@ impl<'a> Viewport for ViewportStdout<'a>{
     }
 
     fn change_size(&mut self, new_width: usize, new_height: usize) {
-        self.buf = vec![vec![String::with_capacity(15);new_width];new_height];
-        for y in 0..new_height{
-            for x in 0..new_width{
-                self.buf[y][x] = "\x1B[38;5;016mB\x1B[m".to_string();
-            }
-        }
         self.width = new_width;
         self.height = new_height;
     }
-
+    
     fn display(&mut self, cs: &Vec<Vec<RenderChar>>) {
-        let buf = &mut self.buf;
-        self.out.write(b"\x1B[0;0H\x1B[?25l").unwrap();
-        for y in 0..self.height{
-            if let Some(v) = cs.get(y){
-                for x in 0..self.width{
-                    if let Some(rch) = v.get(x){
-                        let color:Color8bit = rch.color.into();
-                        let s = &mut buf[y][x];
-                        let c1 = from_digit((color.data / 100) as u32,10).unwrap();
-                        let c2 = from_digit(((color.data / 10) % 10) as u32,10).unwrap();
-                        let c3 = from_digit((color.data % 10) as u32,10).unwrap();
-                        let mut c_string = String::with_capacity(3);
-                        c_string.push(c1);
-                        c_string.push(c2);
-                        c_string.push(c3);
+        let mut out = vec![];
+        out.extend_from_slice(b"\x1B[0;0H");
 
-                        s.replace_range((Included(7),Excluded(10)),c_string.as_str());
-                        s.replace_range((Included(11), Included(11)), String::from(rch.c).as_str());
-                        self.out.write(s.as_bytes()).unwrap();
-                    }
-                    else{
-                        break;
-                    }
-                }
-                self.out.write(b"\n").unwrap();
+        for line in cs{
+            out.extend_from_slice(b"\x1B[?25l");
+            for rc in line{
+                let color:Color8bit = rc.color.into();
+                out.extend_from_slice(format!("\x1B[38;5;{}m{}\x1B[m", color.data, rc.c).as_ref());
             }
-            else{
-                break;
-            }
+            out.extend_from_slice(b"\n");
         }
+
+        out.extend_from_slice(b"\x1B[?25h");
+        self.out.write(&out).unwrap();
         self.out.flush().unwrap();
     }
 }
@@ -929,7 +906,6 @@ impl<'a> ViewportStdout<'a> {
         let mut v = ViewportStdout {
             width:w,
             height:h,
-            buf:vec![],
             out:BufWriter::new(stdout().lock())
         };
         v.change_size(w,h);

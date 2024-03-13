@@ -200,12 +200,12 @@ fn main() {
         y: 20.0,
         z: 0.0,
     };
-    
+
     cam_objn.direction = Quaternion::new(&Vec3{
         x: 0.0,
         y: 0.0,
         z: 1.0,
-    }, -cam_objn.position.y.atan2(-cam_objn.position.x), 1.0); 
+    }, -cam_objn.position.y.atan2(-cam_objn.position.x), 1.0);
 
     cam_objn.attribute = PresetCamera::SimpleGPU(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::default(), &engine)).make_attribute_enum();
     cam_objn.attribute = SimpleBVHCamera::default().make_attribute_enum();
