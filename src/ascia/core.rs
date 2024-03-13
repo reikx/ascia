@@ -163,6 +163,7 @@ pub struct Polygon<CO: CoordinateType>{
 }
 
 
+
 impl<'a, CO:CoordinateType> RaytracingTarget for &'a Polygon<CO>{
     type Intersection = PolygonRayIntersection<'a, CO>;
 
