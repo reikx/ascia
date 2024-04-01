@@ -10,8 +10,7 @@ use std::time::{Duration, Instant};
 use ascia::ascia::camera::{SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::camera_gpu::GPUWrapper;
 use ascia::ascia::color::ColorRGBf32;
-use ascia::ascia::core::{AsciaEngine, FlatMaterial, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, PresetCamera, PresetMaterial, PresetObjectNodeAttribute};
-use ascia::ascia::core::PresetObjectNodeAttribute::Camera;
+use ascia::ascia::core::{AsciaEngine, CameraDispatcher, FlatMaterial, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetCamera, PresetMaterial, PresetObjectNodeAttributeDispatcher};
 use ascia::ascia::lights::{PointLight};
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
@@ -60,7 +59,7 @@ impl RollingCube {
         };
     }
 
-    fn update(&mut self, root: &mut ObjectNode<Local>, engine_time: &Duration){
+    fn update(&mut self, root: &mut ObjectNode<PresetAsciaEnvironment, Local>, engine_time: &Duration){
         let mut self_objn = root.child_mut(&self.label).unwrap();
         if *engine_time > self.animation_start + self.animation_duration{
             self.decide_next();
@@ -136,7 +135,7 @@ impl FlashingFloor {
             animation_duration: animation_duration,
         };
     }
-    fn update(&mut self, root: &mut ObjectNode<Local>, engine_time: &Duration) {
+    fn update(&mut self, root: &mut ObjectNode<PresetAsciaEnvironment, Local>, engine_time: &Duration) {
         let mut self_objn = root.child_mut(&self.label).unwrap();
         let s = if *engine_time <= self.animation_start{
             1.0
@@ -148,7 +147,7 @@ impl FlashingFloor {
 
 
         for p in &mut self_objn.polygons{
-            if let PresetMaterial::Lambert(m) = &mut p.material{
+            if let PresetMaterial::LambertMaterial(m) = &mut p.material{
                 m.color = ColorRGBf32{
                     r: s,
                     g: s,
@@ -170,7 +169,7 @@ fn main() {
     let mut cubes = vec![];
     for i in 0..32{
         let label = format!("cube {}", i);
-        engine.genesis_local.add_child(ObjectNode::from(&label, PrimitiveGenerator::cube(cube_size, PresetMaterial::Lambert(LambertMaterial::default()))));
+        engine.genesis_local.add_child(ObjectNode::from(&label, PrimitiveGenerator::cube(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default()))));
         cubes.push(RollingCube::new(cube_size, &label, engine.engine_time(), Duration::new(0, 500000000)));
     }
 
@@ -178,7 +177,7 @@ fn main() {
     let mut floors = VecDeque::new();
     for i in 0..32{
         let label = format!("floor {} {}", cubes[i].current_grid.0, cubes[i].current_grid.1);
-        let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::Lambert(LambertMaterial::default())));
+        let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default())));
         f.position = Vec3{
             x: (cubes[i].current_grid.0 as f32 + 0.5) * cube_size,
             y: 0.0,
@@ -207,23 +206,21 @@ fn main() {
         z: 1.0,
     }, -cam_objn.position.y.atan2(-cam_objn.position.x), 1.0);
 
-    cam_objn.attribute = PresetCamera::SimpleGPU(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::default(), &engine)).make_attribute_enum();
-    cam_objn.attribute = SimpleBVHCamera::default().make_attribute_enum();
-    cam_objn.attribute = SimpleCamera::default().make_attribute_enum();
+    cam_objn.attribute = PresetObjectNodeAttributeDispatcher::from(SimpleCamera::default()).make_shared();
 
     let mut cam_root = ObjectNode::new("camera root");
     cam_root.add_child(cam_objn);
     engine.genesis_local.add_child(cam_root);
 
     let mut light_objn = ObjectNode::new("light");
-    light_objn.attribute = PointLight{
+    light_objn.attribute = PresetObjectNodeAttributeDispatcher::from(PointLight{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
             b: 1.0,
         },
         power: 1.4,
-    }.make_attribute_enum();
+    }).make_shared();
     light_objn.position = Vec3{
         x: -50.0,
         y: 150.0,
@@ -238,7 +235,7 @@ fn main() {
         for c in &mut cubes{
             let label = format!("floor {} {}", c.current_grid.0, c.current_grid.1);
             if engine.genesis_local.child(&label).is_none(){
-                let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::Lambert(LambertMaterial::default())));
+                let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default())));
                 f.position = Vec3{
                     x: (c.current_grid.0 as f32 + 0.5) * cube_size,
                     y: 0.0,
@@ -291,15 +288,16 @@ fn main() {
     }
 }
 
-fn camera_info(attr: &Rc<RefCell<PresetObjectNodeAttribute>>) -> String{
-    if let Camera(c) = &*RefCell::borrow(attr){
+fn camera_info(attr: &Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>) -> String{
+    if let Some(PresetObjectNodeAttributeDispatcher::Camera(c)) = &*RefCell::borrow(attr){
         return match c {
-            PresetCamera::Simple(cam) => { format!("simple cpu {}x", cam.sampling_size) }
-            PresetCamera::SimpleGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
-            PresetCamera::SimpleBVH(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
-            PresetCamera::SimpleBVHGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
+            PresetCamera::SimpleCamera(cam) => { format!("simple cpu {}x", cam.sampling_size) }
+            PresetCamera::SimpleCameraGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
+            PresetCamera::SimpleBVHCamera(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
+            PresetCamera::SimpleBVHCameraGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
         };
     }
     return "unknown".to_string();
 }
+
 

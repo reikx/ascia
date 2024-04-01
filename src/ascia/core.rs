@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{BufWriter, stdout, StdoutLock, Write};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Included};
+use std::ops::Deref;
 use std::rc::{Rc};
 use std::time::{Duration, Instant};
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
@@ -12,20 +13,172 @@ use crate::ascia::color::{Color8bit, ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 use crate::ascia::math::{AABB3D, Matrix33, Quaternion, Vec2, Vec3};
 
-pub trait AsciaEnvironment{
-    type Materials;
-    type Cameras;
-    type ObjectNodeAttributes;
+pub trait AsciaEnvironment where Self: 'static{
+    type Materials: MaterialCollection + Clone;
+    type Cameras: CameraDispatcher<Self>;
+    type Lights: LightDispatcher<Self>;
+    type ObjectNodeAttributes: ObjectNodeAttributeDispatcher<Self>;
 }
 
-pub struct PresetAsciaEnvironment{
-    
+pub trait Dispatcher<T> {}
+
+
+pub trait ObjectNodeAttribute<E: AsciaEnvironment + ?Sized>{
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self: Sized{
+        E::ObjectNodeAttributes::from(self)
+    }
+}
+
+pub trait Material<E: AsciaEnvironment + ?Sized, CA: Camera<E> + ?Sized, RT: RaytracingTarget<0>>: Clone{
+    fn calc_color(&self, intersection: &RT::Intersection, engine: &AsciaEngine<E>, camera:&CA, camera_node: &ObjectNode<E,Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
+    fn make_material_dispatcher<'a>(self) -> E::Materials where (E::Materials): From<Self>{
+        E::Materials::from(self)
+    }
+}
+
+pub trait MaterialCollection: Default{}
+pub trait MaterialDispatcher<'a, E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>: Camera<E>{
+    fn calc_color(&self, intersection: &'a RT::Intersection, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
+}
+
+pub trait Camera<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
+    fn render(&self, camera_node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>>;
+    fn make_camera_dispatcher(self) -> E::Cameras where (E::Cameras): From<Self>, Self: Sized{
+        E::Cameras::from(self)
+    }
+}
+pub trait CameraDispatcher<E: AsciaEnvironment + ?Sized>: Default{
+    fn render(&self, camera_node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>>;
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self:Sized{
+        E::ObjectNodeAttributes::from(self)
+    }
+}
+
+pub trait Light<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
+    fn ray(&self, light_node: &ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32;
+    fn make_light_dispatcher(self) -> E::Lights where (E::Lights): From<Self>, Self: Sized{
+        E::Lights::from(self)
+    }
+}
+
+pub trait LightDispatcher<E: AsciaEnvironment + ?Sized>: Default{
+    fn ray(&self, light_node: &ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32;
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self:Sized{
+        E::ObjectNodeAttributes::from(self)
+    }
+}
+
+pub trait ObjectNodeAttributeDispatcher<E: AsciaEnvironment + ?Sized>{
+    fn make_shared(self) -> Rc<RefCell<Option<Self>>> where Self: Sized;
+    fn camera(&self) -> Option<&E::Cameras>;
+    fn light(&self) -> Option<&E::Lights>;
+}
+
+pub struct PresetAsciaEnvironment{}
+
+#[derive(Copy, Clone)]
+pub enum PresetMaterial{
+    FlatMaterial(FlatMaterial),
+    LambertMaterial(LambertMaterial),
+    LambertWithShadowMaterial(LambertWithShadowMaterial),
+}
+
+impl Default for PresetMaterial{
+    fn default() -> Self {
+        PresetMaterial::FlatMaterial(FlatMaterial::default())
+    }
+}
+
+impl MaterialCollection for PresetMaterial{}
+
+pub enum PresetCamera<E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>>{
+    SimpleCamera(SimpleCamera<E>),
+    SimpleBVHCamera(SimpleBVHCamera<E>),
+    SimpleCameraGPU(GPUWrapper<E, SimpleCamera<E>>),
+    SimpleBVHCameraGPU(GPUWrapper<E, SimpleBVHCamera<E>>)
+}
+
+impl<E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Default for PresetCamera<E> {
+    fn default() -> Self {
+        PresetCamera::SimpleCamera(SimpleCamera::default())
+    }
+}
+
+impl<E: AsciaEnvironment<Cameras = PresetCamera<E>, Materials = PresetMaterial, Lights = PresetLight>> CameraDispatcher<E> for PresetCamera<E>{
+    fn render(&self, camera_node: &ObjectNode<E,Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>> {
+        match self {
+            PresetCamera::SimpleCamera(c) => {c.render(camera_node, engine)}
+            PresetCamera::SimpleBVHCamera(c) => {c.render(camera_node, engine)}
+            PresetCamera::SimpleCameraGPU(c) => {c.render(camera_node, engine)}
+            PresetCamera::SimpleBVHCameraGPU(c) => {c.render(camera_node, engine)}
+        }
+    }
+}
+
+pub enum PresetLight{
+    PointLight(PointLight)
+}
+
+impl Default for PresetLight{
+    fn default() -> Self {
+        PresetLight::PointLight(PointLight::default())
+    }
+}
+
+impl<E: AsciaEnvironment> LightDispatcher<E> for PresetLight{
+    fn ray(&self, light_node: &ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32 {
+        match self {
+            PresetLight::PointLight(l) => { l.ray(light_node, to) }
+        }
+    }
+}
+
+pub enum PresetObjectNodeAttributeDispatcher<E: AsciaEnvironment>{
+    Camera(E::Cameras),
+    Light(E::Lights)
+}
+
+impl<E: AsciaEnvironment<Materials = PresetMaterial, Cameras = PresetCamera<E>, Lights = PresetLight>> From<PresetCamera<E>> for PresetObjectNodeAttributeDispatcher<E>{
+    fn from(value: PresetCamera<E>) -> Self {
+        PresetObjectNodeAttributeDispatcher::Camera(value)
+    }
+}
+
+impl<E: AsciaEnvironment<Lights = PresetLight>> From<PresetLight> for PresetObjectNodeAttributeDispatcher<E>{
+    fn from(value: PresetLight) -> Self {
+        PresetObjectNodeAttributeDispatcher::Light(value)
+    }
+}
+
+impl<E:AsciaEnvironment> ObjectNodeAttributeDispatcher<E> for PresetObjectNodeAttributeDispatcher<E>{
+    fn make_shared(self) -> Rc<RefCell<Option<Self>>> where Self: Sized{
+        Rc::new(RefCell::new(Some(self)))
+    }
+
+    fn camera(&self) -> Option<&E::Cameras> {
+        if let Self::Camera(c) = self{
+            Some(c)
+        }
+        else{
+            None
+        }
+    }
+
+    fn light(&self) -> Option<&E::Lights> {
+        if let Self::Light(l) = self{
+            Some(l)
+        }
+        else{
+            None
+        }
+    }
 }
 
 impl AsciaEnvironment for PresetAsciaEnvironment{
     type Materials = PresetMaterial;
-    type Cameras = PresetCamera;
-    type ObjectNodeAttributes = PresetObjectNodeAttribute;
+    type Cameras = PresetCamera<Self>;
+    type Lights = PresetLight;
+    type ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<Self>;
 }
 
 pub trait CoordinateType{}
@@ -39,363 +192,9 @@ pub struct Global{}
 impl CoordinateType for Global{}
 
 #[derive(Debug, Copy, Clone)]
-pub struct Ray{
-    pub position:Vec3, // TODO CoordinateType
-    pub direction:Vec3,
-}
-
-impl Ray{
-    pub fn project<T: RaytracingTarget, F: Fn(&T::Intersection) -> bool>(&self, target: T, exclude_cond: &F) -> Option<T::Intersection>{
-        return target.project_by(self, exclude_cond);
-    }
-}
-
-pub trait RayIntersection{
-    fn position(&self) -> Vec3;
-    fn ray(&self) -> Ray;
-    fn depth(&self) -> f32;
-}
-
-#[derive(Copy)]
-pub struct PolygonRayIntersection<'a, CO:CoordinateType>{
-    pub polygon: &'a Polygon<CO>,
-    pub depth:f32,
-    pub position_on_polygon:Vec2,
-    pub position:Vec3,
-    pub ray: Ray,
-    pub normal: Vec3
-}
-
-impl<'a, CO:CoordinateType> Clone for PolygonRayIntersection<'a, CO>{
-    fn clone(&self) -> Self {
-        return PolygonRayIntersection{
-            polygon: self.polygon,
-            depth: self.depth,
-            position_on_polygon: self.position_on_polygon,
-            position: self.position,
-            ray: self.ray,
-            normal: self.normal,
-        }
-    }
-}
-
-impl<'a, CO:CoordinateType> RayIntersection for PolygonRayIntersection<'a, CO>{
-    fn position(&self) -> Vec3 {
-        return self.position;
-    }
-
-    fn ray(&self) -> Ray {
-        return self.ray;
-    }
-
-    fn depth(&self) -> f32 {
-        return self.depth;
-    }
-}
-
-pub struct CParticleRayIntersection<'a, CO:CoordinateType>{
-    pub particle: &'a CParticle<CO>,
-    pub depth:f32,
-    pub position:Vec3,
-    pub ray: Ray,
-    pub distance: f32
-}
-
-impl<'a, C:CoordinateType> Clone for CParticleRayIntersection<'a, C>{
-    fn clone(&self) -> Self {
-        return CParticleRayIntersection{
-            particle: self.particle,
-            depth: self.depth,
-            position: self.position,
-            ray: self.ray,
-            distance: self.distance,
-        }
-    }
-}
-
-impl<'a, C:CoordinateType> RayIntersection for CParticleRayIntersection<'a, C>{
-    fn position(&self) -> Vec3 {
-        return self.position;
-    }
-
-    fn ray(&self) -> Ray {
-        return self.ray;
-    }
-
-    fn depth(&self) -> f32 {
-        return self.depth;
-    }
-}
-
-
-#[derive(Copy, Clone)]
-pub struct AABB3DRayIntersection{
-    pub depth:f32,
-    pub position:Vec3,
-    pub ray: Ray
-}
-
-impl<'a> RayIntersection for AABB3DRayIntersection{
-    fn position(&self) -> Vec3 {
-        return self.position;
-    }
-
-    fn ray(&self) -> Ray {
-        return self.ray;
-    }
-
-    fn depth(&self) -> f32 {
-        return self.depth;
-    }
-
-}
-
-pub trait RaytracingTarget {
-    type Intersection: RayIntersection;
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>;
-}
-
-#[derive(Debug, Copy)]
-pub struct Polygon<CO: CoordinateType>{
-    pub poses:Matrix33,
-    pub material: PresetMaterial,
-    pub _ph: PhantomData<CO>
-}
-
-
-
-impl<'a, CO:CoordinateType> RaytracingTarget for &'a Polygon<CO>{
-    type Intersection = PolygonRayIntersection<'a, CO>;
-
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
-        let m2 = Matrix33{
-            v1: self.poses.v1 - ray.position,
-            v2: self.poses.v2 - ray.position,
-            v3: self.poses.v3 - ray.position,
-        };
-        if let Some(m3) = m2.inverse(){
-            let v1 = m3 * (ray.direction);
-            let psy = 1.0 / (v1.x + v1.y + v1.z);
-            if psy != f32::INFINITY && 0.0 < psy{
-                let v2 = v1 * psy;
-                if (0.0 <= v2.x && v2.x <= 1.0) && (0.0 <= v2.y && v2.y <= 1.0) && (0.0 <= v2.z && v2.z <= 1.0){
-                    let depth = psy * ray.direction.norm();
-                    if depth > 0.0{
-                        let i = Self::Intersection{
-                            polygon: self,
-                            position_on_polygon: Vec2{
-                                x:v2.y,
-                                y:v2.z
-                            },
-                            depth: depth,
-                            position: self.poses.v1 + v2.y * (self.poses.v2 - self.poses.v1) + v2.z * (self.poses.v3 - self.poses.v1),
-                            ray: ray.clone(),
-                            normal: ((self.poses.v2 - self.poses.v1) ^ (self.poses.v3 - self.poses.v1)).normalize()
-                        };
-                        return if exclude_cond(&i) { None } else { Some(i) };
-                    }
-                }
-            }
-        }
-        return None;
-    }
-}
-
-impl<'a, C:CoordinateType> RaytracingTarget for &'a CParticle<C>{
-    type Intersection = CParticleRayIntersection<'a, C>;
-
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
-        let a = self.position - ray.position;
-        let k = (ray.direction * a) / (ray.direction * ray.direction);
-        let d = (a - k * ray.direction).norm();
-        match self.mode {
-            CParticleMode::SPHERE => {
-                if d < self.threshold{
-                    let i = CParticleRayIntersection{
-                        particle: self,
-                        depth: k * ray.direction.norm(),
-                        position: ray.position + ray.direction * (k * ray.direction.norm()),
-                        ray: ray.clone(),
-                        distance: d
-                    };
-                    return if exclude_cond(&i) { None } else { Some(i) };
-                }
-            }
-            CParticleMode::ARG => {
-                if f32::sqrt((a * a) / (ray.direction * ray.direction)) * f32::cos(self.threshold) <= k{
-                    let i = CParticleRayIntersection{
-                        particle: self,
-                        depth: k * ray.direction.norm(),
-                        position: ray.position + ray.direction * (k * ray.direction.norm()),
-                        ray: ray.clone(),
-                        distance: d
-                    };
-                    return if exclude_cond(&i) { None } else { Some(i) };
-                }
-            }
-        }
-        return None;
-    }
-}
-
-impl RaytracingTarget for AABB3D{
-    type Intersection = AABB3DRayIntersection;
-
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
-        let v0 = Vec3{
-            x: (self.a.x - ray.position.x) / ray.direction.x,
-            y: (self.a.y - ray.position.y) / ray.direction.y,
-            z: (self.a.z - ray.position.z) / ray.direction.z,
-        };
-        let v1 = Vec3{
-            x: (self.b.x - ray.position.x) / ray.direction.x,
-            y: (self.b.y - ray.position.y) / ray.direction.y,
-            z: (self.b.z - ray.position.z) / ray.direction.z,
-        };
-        
-        let v_min = Vec3{
-            x: f32::min(v0.x, v1.x),
-            y: f32::min(v0.y, v1.y),
-            z: f32::min(v0.z, v1.z)
-        };
-        let v_max = Vec3{
-            x: f32::max(v0.x, v1.x),
-            y: f32::max(v0.y, v1.y),
-            z: f32::max(v0.z, v1.z)
-        };
-        
-        if f32::max(f32::max(v_min.x, v_min.y),v_min.z) <= f32::min(f32::min(v_max.x, v_max.y),v_max.z){
-            let depth = f32::min(f32::min(v_min.x, v_min.y),v_min.z);
-            let i = AABB3DRayIntersection{
-                depth: depth,
-                position: ray.position + ray.direction * depth,
-                ray: ray.clone(),
-            };
-            return if exclude_cond(&i) { None } else { Some(i) };
-        }
-        
-        return None;
-    }
-}
-
-impl<'a,T: RaytracingTarget> RaytracingTarget for &'a [T] {
-    type Intersection = T::Intersection;
-
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
-        let mut nearest:Option<Self::Intersection> = None;
-        for iter in *self{
-            if let Some(i) = iter.project_by(ray, exclude_cond){
-                if let Some(j) = &nearest{
-                    if i.depth() < j.depth(){
-                        nearest = Some(i);
-                    }
-                }
-                else{
-                    nearest = Some(i);
-                }
-            }
-        }
-        return nearest;
-    }
-
-}
-
-
-impl<'a,T> RaytracingTarget for &'a Vec<T> where &'a T: RaytracingTarget {
-    type Intersection = <&'a T as RaytracingTarget>::Intersection;
-
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>{
-        let mut nearest:Option<Self::Intersection> = None;
-        for iter in *self{
-            if let Some(i) = iter.project_by(ray, exclude_cond){
-                if let Some(j) = &nearest{
-                    if i.depth() < j.depth(){
-                        nearest = Some(i);
-                    }
-                }
-                else{
-                    nearest = Some(i);
-                }
-            }
-        }
-        return nearest;
-    }
-}
-
-
-impl<CO: CoordinateType> Clone for Polygon<CO>{
-    fn clone(&self) -> Self {
-        return Polygon{
-            poses: self.poses,
-            material: self.material.clone(),
-            _ph: self._ph
-        }
-    }
-}
-
-
-impl<CO:CoordinateType> Polygon<CO> {
-    pub fn new(p1:&Vec3, p2:&Vec3, p3:&Vec3) -> Self{
-        return Polygon {
-            poses:Matrix33{
-                v1:p1.clone(),
-                v2:p2.clone(),
-                v3:p3.clone()
-            },
-            material: PresetMaterial::Flat(Default::default()),
-            _ph: Default::default()
-        }
-    }
-    
-    pub fn aabb(&self) -> AABB3D{
-        return AABB3D::generate_3(&self.poses.v1, &self.poses.v2, &self.poses.v3);
-    }
-}
-
-pub struct ObjectNode<CO:CoordinateType>{
-    pub tag: String,
-    pub attribute: Rc<RefCell<PresetObjectNodeAttribute>>,
-    pub position: Vec3,
-    pub direction: Quaternion,
-    pub polygons: Vec<Polygon<CO>>,
-    pub c_particles: Vec<CParticle<CO>>,
-    pub children: HashMap<String, ObjectNode<CO>>,
-}
-
-pub enum PresetObjectNodeAttribute {
-    Normal(),
-    Camera(PresetCamera),
-    Light(PresetLight)
-}
-
-pub trait ObjectNodeAttribute{
-    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>>;
-}
-
-pub trait Camera: ObjectNodeAttribute{
-    fn render(&self, camera_node: &ObjectNode<Global>, engine: &AsciaEngine) -> Vec<Vec<RenderChar>>;
-}
-
-pub trait Light: ObjectNodeAttribute{
-    fn ray(&self, light_node: &ObjectNode<Global>, to: &Vec3) -> ColorRGBf32;
-}
-
-pub trait Material<CA: Camera, RT: RaytracingTarget>: Clone{
-    fn calc_color(&self, intersection: &RT::Intersection, engine: &AsciaEngine, camera:&CA, camera_node: &ObjectNode<Global>, global_polygons: &Vec<Polygon<Global>>) -> (ColorRGBf32, u32);
-
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum PresetMaterial{
-    Flat(FlatMaterial),
-    Lambert(LambertMaterial),
-    LambertWithShadow(LambertWithShadowMaterial),
-}
-
-#[derive(Debug, Copy, Clone)]
 pub struct FlatMaterial{
     pub color: ColorRGBf32,
-    pub priority: u32
+    pub priority: u32,
 }
 
 impl Default for FlatMaterial{
@@ -448,81 +247,349 @@ impl Default for LambertWithShadowMaterial{
     }
 }
 
-impl<'a, CA: Camera> Material<CA, &'a CParticle<Global>> for PresetMaterial {
-    fn calc_color(&self, intersection: &<&'a CParticle<Global> as RaytracingTarget>::Intersection, engine: &AsciaEngine, camera: &CA, camera_node: &ObjectNode<Global>, global_polygons: &Vec<Polygon<Global>>) -> (ColorRGBf32, u32) {
-        match self {
-            PresetMaterial::Flat(m) => {<FlatMaterial as Material<CA, &'a CParticle<Global>>>::calc_color(m, intersection, engine, camera, camera_node, global_polygons)}
-            PresetMaterial::Lambert(m) => { panic!() }
-            PresetMaterial::LambertWithShadow(m) => { panic!() }
+#[derive(Debug, Copy, Clone)]
+pub struct Ray{
+    pub position:Vec3, // TODO CoordinateType
+    pub direction:Vec3,
+}
+
+impl Ray{
+    pub fn project<const RC: usize, T: RaytracingTarget<RC>, F: Fn(&T::Intersection) -> bool>(&self, target: T, exclude_cond: &F) -> Option<T::Intersection>{
+        return target.project_by(self, exclude_cond);
+    }
+}
+
+pub trait RayIntersection{
+    fn position(&self) -> Vec3;
+    fn ray(&self) -> Ray;
+    fn depth(&self) -> f32;
+}
+
+#[derive(Copy)]
+pub struct PolygonRayIntersection<'a, E: AsciaEnvironment + ?Sized + 'static, CO:CoordinateType>{
+    pub polygon: &'a Polygon<E, CO>,
+    pub depth:f32,
+    pub position_on_polygon:Vec2,
+    pub position:Vec3,
+    pub ray: Ray,
+    pub normal: Vec3
+}
+
+impl<'a, E:AsciaEnvironment + ?Sized, CO:CoordinateType> Clone for PolygonRayIntersection<'a, E, CO>{
+    fn clone(&self) -> Self {
+        return PolygonRayIntersection{
+            polygon: self.polygon,
+            depth: self.depth,
+            position_on_polygon: self.position_on_polygon,
+            position: self.position,
+            ray: self.ray,
+            normal: self.normal,
         }
     }
 }
 
-impl<'a, CA: Camera> Material<CA, &'a Polygon<Global>> for PresetMaterial where LambertWithShadowMaterial: Material<CA, &'a Polygon<Global>>{
-    fn calc_color(&self, intersection: &<&'a Polygon<Global> as RaytracingTarget>::Intersection, engine: &AsciaEngine, camera: &CA, camera_node: &ObjectNode<Global>, global_polygons: &Vec<Polygon<Global>>) -> (ColorRGBf32, u32) {
-        match self {
-            PresetMaterial::Flat(m) => {<FlatMaterial as Material<CA, &'a Polygon<Global>>>::calc_color(m, intersection, engine, camera, camera_node, global_polygons)}
-            PresetMaterial::Lambert(m) => {<LambertMaterial as Material<CA, &'a Polygon<Global>>>::calc_color(m,intersection, engine, camera, camera_node, global_polygons)}
-            PresetMaterial::LambertWithShadow(m) => {<LambertWithShadowMaterial as Material<CA, &'a Polygon<Global>>>::calc_color(m,intersection, engine, camera, camera_node, global_polygons)}
+impl<'a, E:AsciaEnvironment + ?Sized, CO:CoordinateType> RayIntersection for PolygonRayIntersection<'a, E, CO>{
+    fn position(&self) -> Vec3 {
+        return self.position;
+    }
+
+    fn ray(&self) -> Ray {
+        return self.ray;
+    }
+
+    fn depth(&self) -> f32 {
+        return self.depth;
+    }
+}
+
+pub struct CParticleRayIntersection<'a, E: AsciaEnvironment + ?Sized, CO:CoordinateType>{
+    pub particle: &'a CParticle<E, CO>,
+    pub depth:f32,
+    pub position:Vec3,
+    pub ray: Ray,
+    pub distance: f32,
+    _ph: PhantomData<E>
+}
+
+impl<'a, E: AsciaEnvironment + ?Sized, C:CoordinateType> Clone for CParticleRayIntersection<'a, E, C>{
+    fn clone(&self) -> Self {
+        return CParticleRayIntersection{
+            particle: self.particle,
+            depth: self.depth,
+            position: self.position,
+            ray: self.ray,
+            distance: self.distance,
+            _ph: Default::default(),
         }
     }
 }
 
-pub enum PresetCamera{
-    Simple(SimpleCamera),
-    SimpleGPU(GPUWrapper<SimpleCamera>),
-    SimpleBVH(SimpleBVHCamera),
-    SimpleBVHGPU(GPUWrapper<SimpleBVHCamera>),
-}
+impl<'a, E: AsciaEnvironment + ?Sized, C:CoordinateType> RayIntersection for CParticleRayIntersection<'a, E, C>{
+    fn position(&self) -> Vec3 {
+        return self.position;
+    }
 
-pub enum PresetLight{
-    Point(PointLight)
-}
+    fn ray(&self) -> Ray {
+        return self.ray;
+    }
 
-impl ObjectNodeAttribute for PresetCamera {
-    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
-        return Rc::new(RefCell::new(PresetObjectNodeAttribute::Camera(self)));
+    fn depth(&self) -> f32 {
+        return self.depth;
     }
 }
 
-impl Camera for PresetCamera{
-    fn render(&self, node: &ObjectNode<Global>, engine: &AsciaEngine) -> Vec<Vec<RenderChar>> {
-        match self {
-            PresetCamera::Simple(camera) => {camera.render(node,engine)}
-            PresetCamera::SimpleGPU(camera) => {camera.render(node,engine)}
-            PresetCamera::SimpleBVH(camera) => {camera.render(node,engine)}
-            PresetCamera::SimpleBVHGPU(camera) => {camera.render(node,engine)}
+
+#[derive(Copy, Clone)]
+pub struct AABB3DRayIntersection{
+    pub depth:f32,
+    pub position:Vec3,
+    pub ray: Ray
+}
+
+impl<'a> RayIntersection for AABB3DRayIntersection{
+    fn position(&self) -> Vec3 {
+        return self.position;
+    }
+
+    fn ray(&self) -> Ray {
+        return self.ray;
+    }
+
+    fn depth(&self) -> f32 {
+        return self.depth;
+    }
+
+}
+
+pub trait RaytracingTarget<const RECURSION_COUNT: usize>{
+    type Intersection: RayIntersection;
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>;
+}
+
+#[derive(Debug, Copy)]
+pub struct Polygon<E: AsciaEnvironment + ?Sized + 'static, CO: CoordinateType>{
+    pub poses:Matrix33,
+    pub material: E::Materials,
+    pub _ph: PhantomData<CO>
+}
+
+
+
+impl<'a, E:AsciaEnvironment + ?Sized + 'static, CO:CoordinateType> RaytracingTarget<0> for &'a Polygon<E, CO>{
+    type Intersection = PolygonRayIntersection<'a, E, CO>;
+
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+        let m2 = Matrix33{
+            v1: self.poses.v1 - ray.position,
+            v2: self.poses.v2 - ray.position,
+            v3: self.poses.v3 - ray.position,
+        };
+        if let Some(m3) = m2.inverse(){
+            let v1 = m3 * (ray.direction);
+            let psy = 1.0 / (v1.x + v1.y + v1.z);
+            if psy != f32::INFINITY && 0.0 < psy{
+                let v2 = v1 * psy;
+                if (0.0 <= v2.x && v2.x <= 1.0) && (0.0 <= v2.y && v2.y <= 1.0) && (0.0 <= v2.z && v2.z <= 1.0){
+                    let depth = psy * ray.direction.norm();
+                    if depth > 0.0{
+                        let i = Self::Intersection{
+                            polygon: self,
+                            position_on_polygon: Vec2{
+                                x:v2.y,
+                                y:v2.z
+                            },
+                            depth: depth,
+                            position: self.poses.v1 + v2.y * (self.poses.v2 - self.poses.v1) + v2.z * (self.poses.v3 - self.poses.v1),
+                            ray: ray.clone(),
+                            normal: ((self.poses.v2 - self.poses.v1) ^ (self.poses.v3 - self.poses.v1)).normalize()
+                        };
+                        return if exclude_cond(&i) { None } else { Some(i) };
+                    }
+                }
+            }
+        }
+        return None;
+    }
+}
+
+impl<'a, E:AsciaEnvironment + ?Sized, C:CoordinateType> RaytracingTarget<0> for &'a CParticle<E, C>{
+    type Intersection = CParticleRayIntersection<'a, E, C>;
+
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+        let a = self.position - ray.position;
+        let k = (ray.direction * a) / (ray.direction * ray.direction);
+        let d = (a - k * ray.direction).norm();
+        match self.mode {
+            CParticleMode::SPHERE => {
+                if d < self.threshold{
+                    let i = CParticleRayIntersection{
+                        particle: self,
+                        depth: k * ray.direction.norm(),
+                        position: ray.position + ray.direction * (k * ray.direction.norm()),
+                        ray: ray.clone(),
+                        distance: d,
+                        _ph: Default::default(),
+                    };
+                    return if exclude_cond(&i) { None } else { Some(i) };
+                }
+            }
+            CParticleMode::ARG => {
+                if f32::sqrt((a * a) / (ray.direction * ray.direction)) * f32::cos(self.threshold) <= k{
+                    let i = CParticleRayIntersection{
+                        particle: self,
+                        depth: k * ray.direction.norm(),
+                        position: ray.position + ray.direction * (k * ray.direction.norm()),
+                        ray: ray.clone(),
+                        distance: d,
+                        _ph: Default::default(),
+                    };
+                    return if exclude_cond(&i) { None } else { Some(i) };
+                }
+            }
+        }
+        return None;
+    }
+}
+
+impl RaytracingTarget<0> for AABB3D{
+    type Intersection = AABB3DRayIntersection;
+
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+        let v0 = Vec3{
+            x: (self.a.x - ray.position.x) / ray.direction.x,
+            y: (self.a.y - ray.position.y) / ray.direction.y,
+            z: (self.a.z - ray.position.z) / ray.direction.z,
+        };
+        let v1 = Vec3{
+            x: (self.b.x - ray.position.x) / ray.direction.x,
+            y: (self.b.y - ray.position.y) / ray.direction.y,
+            z: (self.b.z - ray.position.z) / ray.direction.z,
+        };
+        
+        let v_min = Vec3{
+            x: f32::min(v0.x, v1.x),
+            y: f32::min(v0.y, v1.y),
+            z: f32::min(v0.z, v1.z)
+        };
+        let v_max = Vec3{
+            x: f32::max(v0.x, v1.x),
+            y: f32::max(v0.y, v1.y),
+            z: f32::max(v0.z, v1.z)
+        };
+        
+        if f32::max(f32::max(v_min.x, v_min.y),v_min.z) <= f32::min(f32::min(v_max.x, v_max.y),v_max.z){
+            let depth = f32::min(f32::min(v_min.x, v_min.y),v_min.z);
+            let i = AABB3DRayIntersection{
+                depth: depth,
+                position: ray.position + ray.direction * depth,
+                ray: ray.clone(),
+            };
+            return if exclude_cond(&i) { None } else { Some(i) };
+        }
+        
+        return None;
+    }
+}
+
+impl<'a,T: RaytracingTarget<0>> RaytracingTarget<1> for &'a [T] {
+    type Intersection = T::Intersection;
+
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+        let mut nearest:Option<Self::Intersection> = None;
+        for iter in *self{
+            if let Some(i) = iter.project_by(ray, exclude_cond){
+                if let Some(j) = &nearest{
+                    if i.depth() < j.depth(){
+                        nearest = Some(i);
+                    }
+                }
+                else{
+                    nearest = Some(i);
+                }
+            }
+        }
+        return nearest;
+    }
+
+}
+
+
+
+impl<'a,T> RaytracingTarget<1> for &'a Vec<T> where &'a T: RaytracingTarget<0> {
+    type Intersection = <&'a T as RaytracingTarget<0>>::Intersection;
+
+    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>{
+        let mut nearest:Option<Self::Intersection> = None;
+        for iter in *self{
+            if let Some(i) = iter.project_by(ray, exclude_cond){
+                if let Some(j) = &nearest{
+                    if i.depth() < j.depth(){
+                        nearest = Some(i);
+                    }
+                }
+                else{
+                    nearest = Some(i);
+                }
+            }
+        }
+        return nearest;
+    }
+}
+
+
+impl<E: AsciaEnvironment, CO: CoordinateType> Clone for Polygon<E, CO>{
+    fn clone(&self) -> Self {
+        return Polygon{
+            poses: self.poses,
+            material: self.material.clone(),
+            _ph: self._ph
         }
     }
 }
 
-impl ObjectNodeAttribute for PresetLight {
-    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
-        return Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(self)));
+
+impl<E:AsciaEnvironment,CO:CoordinateType> Polygon<E, CO> {
+    pub fn new(p1:&Vec3, p2:&Vec3, p3:&Vec3) -> Self{
+        return Polygon {
+            poses:Matrix33{
+                v1:p1.clone(),
+                v2:p2.clone(),
+                v3:p3.clone()
+            },
+            material: E::Materials::default(),
+            _ph: Default::default()
+        }
+    }
+    
+    pub fn aabb(&self) -> AABB3D{
+        return AABB3D::generate_3(&self.poses.v1, &self.poses.v2, &self.poses.v3);
     }
 }
 
-impl Light for PresetLight{
-    fn ray(&self, node: &ObjectNode<Global>, to: &Vec3) -> ColorRGBf32 {
-        match self{
-            PresetLight::Point(light) => {light.ray(node, to)}
-        }
-    }
+pub struct ObjectNode<E: AsciaEnvironment + ?Sized + 'static,CO:CoordinateType>{
+    pub tag: String,
+    pub attribute: Rc<RefCell<Option<E::ObjectNodeAttributes>>>,
+    pub position: Vec3,
+    pub direction: Quaternion,
+    pub polygons: Vec<Polygon<E, CO>>,
+    pub c_particles: Vec<CParticle<E, CO>>,
+    pub children: HashMap<String, ObjectNode<E, CO>>,
 }
 
 #[derive(Copy)]
 #[repr(C)]
-pub struct CParticle<C: CoordinateType> {
+pub struct CParticle<E: AsciaEnvironment + ?Sized + 'static, C: CoordinateType> {
     pub position:Vec3,
     pub velocity:Vec3,
     pub color:ColorRGBf32,
     pub c:char,
     pub threshold:f32,
     pub mode:CParticleMode,
+    pub material: E::Materials,
     pub _ph: PhantomData<C>
 }
 
-impl<C: CoordinateType> Clone for CParticle<C>{
+impl<E: AsciaEnvironment, C: CoordinateType> Clone for CParticle<E, C>{
     fn clone(&self) -> Self {
         return CParticle{
             position: self.position,
@@ -531,6 +598,7 @@ impl<C: CoordinateType> Clone for CParticle<C>{
             c: self.c,
             threshold: self.threshold,
             mode: self.mode,
+            material: E::Materials::default(),
             _ph: Default::default(),
         }
     }
@@ -543,13 +611,13 @@ pub enum CParticleMode{
     ARG = 1u32
 }
 
-pub struct ObjectNodeIter<'a, CO: CoordinateType>{
-    prior: Option<&'a ObjectNode<CO>>,
-    stack: VecDeque<std::collections::hash_map::Iter<'a,String, ObjectNode<CO>>>,
+pub struct ObjectNodeIter<'a, E:AsciaEnvironment, CO: CoordinateType>{
+    prior: Option<&'a ObjectNode<E, CO>>,
+    stack: VecDeque<std::collections::hash_map::Iter<'a,String, ObjectNode<E, CO>>>,
 }
 
-impl<'a, CO: CoordinateType> Iterator for ObjectNodeIter<'a, CO>{
-    type Item = &'a ObjectNode<CO>;
+impl<'a, E:AsciaEnvironment, CO: CoordinateType> Iterator for ObjectNodeIter<'a, E, CO>{
+    type Item = &'a ObjectNode<E, CO>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(root) = self.prior{
@@ -570,7 +638,7 @@ impl<'a, CO: CoordinateType> Iterator for ObjectNodeIter<'a, CO>{
     }
 }
 
-impl<C:CoordinateType> ObjectNode<C>{
+impl<E:AsciaEnvironment, C:CoordinateType> ObjectNode<E, C>{
     pub fn position(&self) -> Vec3{
         return self.position.clone();
     }
@@ -579,7 +647,7 @@ impl<C:CoordinateType> ObjectNode<C>{
         return self.direction.clone();
     }
 
-    pub fn add_child(&mut self, child: ObjectNode<C>){
+    pub fn add_child(&mut self, child: ObjectNode<E, C>){
         self.children.insert(child.tag.clone(), child);
     }
 
@@ -587,15 +655,15 @@ impl<C:CoordinateType> ObjectNode<C>{
         self.children.remove(&tag);
     }
 
-    pub fn child(&self, tag: &str) -> Option<&ObjectNode<C>>{
+    pub fn child(&self, tag: &str) -> Option<&ObjectNode<E, C>>{
         return self.children.get(&tag.to_string());
     }
 
-    pub fn child_mut(&mut self, tag: &str) -> Option<&mut ObjectNode<C>>{
+    pub fn child_mut(&mut self, tag: &str) -> Option<&mut ObjectNode<E, C>>{
         return self.children.get_mut(&tag.to_string());
     }
 
-    pub fn iter(&self) -> ObjectNodeIter<C>{
+    pub fn iter(&self) -> ObjectNodeIter<E, C>{
         let mut stack = VecDeque::new();
         return ObjectNodeIter{
             prior: Some(self),
@@ -604,14 +672,14 @@ impl<C:CoordinateType> ObjectNode<C>{
     }
 }
 
-impl ObjectNode<Local>{
+impl<E:AsciaEnvironment> ObjectNode<E, Local>{
     pub fn new(tag: &str) -> Self{
         return ObjectNode::from(tag,vec![]);
     }
-    pub fn from(tag: &str, polygons:Vec<Polygon<Local>>) -> Self {
+    pub fn from(tag: &str, polygons:Vec<Polygon<E, Local>>) -> Self {
         return ObjectNode{
             tag: tag.to_string(),
-            attribute: Rc::new(RefCell::new(PresetObjectNodeAttribute::Normal())),
+            attribute: Rc::new(RefCell::new(None)),
             position: Vec3::default(),
             direction: Quaternion::default(),
             polygons: polygons,
@@ -619,9 +687,9 @@ impl ObjectNode<Local>{
             children: Default::default()
         };
     }
-    pub fn generate_global_nodes(&self) -> ObjectNode<Global>{
+    pub fn generate_global_nodes(&self) -> ObjectNode<E, Global>{
         let mut iter = self.iter();
-        let mut stack_global:VecDeque<ObjectNode<Global>> = VecDeque::new();
+        let mut stack_global:VecDeque<ObjectNode<E, Global>> = VecDeque::new();
         while let Some(now) = iter.next(){
             while stack_global.len() + 1 > iter.stack.len(){
                 let node = stack_global.pop_back();
@@ -655,7 +723,7 @@ impl ObjectNode<Local>{
                         v2: child.position + child.direction.rotate(&p.poses.v2),
                         v3: child.position + child.direction.rotate(&p.poses.v3),
                     },
-                    material: p.material,
+                    material: p.material.clone(),
                     _ph: Default::default(),
                 });
             }
@@ -667,6 +735,7 @@ impl ObjectNode<Local>{
                     c: p.c,
                     threshold: p.threshold,
                     mode: p.mode,
+                    material: E::Materials::default(),
                     _ph: Default::default(),
                 });
             }
@@ -685,8 +754,7 @@ mod tests{
     use std::cell::RefCell;
     use std::f32::consts::PI;
     use std::rc::Rc;
-    use crate::ascia::core::{Local, ObjectNode, Polygon};
-    use crate::ascia::core::PresetObjectNodeAttribute::Normal;
+    use crate::ascia::core::{Local, ObjectNode, Polygon, PresetAsciaEnvironment};
     use crate::ascia::math::{Matrix33, Quaternion, Vec3};
 
     #[test]
@@ -723,9 +791,9 @@ mod tests{
             y: -2.0,
             z: 3.0,
         };
-        let mut a: ObjectNode<Local> = ObjectNode{
+        let mut a: ObjectNode<PresetAsciaEnvironment, Local> = ObjectNode{
             tag: "a".to_string(),
-            attribute: Rc::new(RefCell::new(Normal())),
+            attribute: Rc::new(RefCell::new(None)),
             position: a_pos_local,
             direction: a_dir_local,
             polygons: vec![
@@ -748,9 +816,9 @@ mod tests{
             c_particles: vec![],
             children: Default::default(),
         };
-        let b: ObjectNode<Local> = ObjectNode{
+        let b: ObjectNode<PresetAsciaEnvironment, Local> = ObjectNode{
             tag: "b".to_string(),
-            attribute: Rc::new(RefCell::new(Normal())),
+            attribute: Rc::new(RefCell::new(None)),
             position: b_pos_local,
             direction: Default::default(),
             polygons: vec![
@@ -773,9 +841,9 @@ mod tests{
             c_particles: vec![],
             children: Default::default(),
         };
-        let mut c: ObjectNode<Local> = ObjectNode{
+        let mut c: ObjectNode<PresetAsciaEnvironment,Local> = ObjectNode{
             tag: "c".to_string(),
-            attribute: Rc::new(RefCell::new(Normal())),
+            attribute: Rc::new(RefCell::new(None)),
             position: c_pos_local,
             direction: c_dir_local,
             polygons: vec![
@@ -799,9 +867,9 @@ mod tests{
             c_particles: vec![],
             children: Default::default(),
         };
-        let d: ObjectNode<Local> = ObjectNode{
+        let d: ObjectNode<PresetAsciaEnvironment, Local> = ObjectNode{
             tag: "d".to_string(),
-            attribute: Rc::new(RefCell::new(Normal())),
+            attribute: Rc::new(RefCell::new(None)),
             position: d_pos_local,
             direction: Default::default(),
             polygons: vec![
@@ -919,16 +987,16 @@ impl<'a> ViewportStdout<'a> {
     }
 }
 
-pub struct AsciaEngine{
-    pub genesis_local: ObjectNode<Local>,
-    pub genesis_global: ObjectNode<Global>,
+pub struct AsciaEngine<E: AsciaEnvironment + ?Sized>{
+    pub genesis_local: ObjectNode<E, Local>,
+    pub genesis_global: ObjectNode<E, Global>,
     pub viewport: RefCell<Box<dyn Viewport>>,
     pub wgpu_daq: Option<(wgpu::Device,wgpu::Queue)>,
     engine_time:Duration,
     engine_started:Instant
 }
 
-impl AsciaEngine{
+impl<E: AsciaEnvironment> AsciaEngine<E>{
     pub fn new(width:usize,height:usize) -> Self{
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let mut limits = wgpu::Limits::default();
@@ -938,21 +1006,22 @@ impl AsciaEngine{
         limits.max_buffer_size = 268435456u64 * 16u64;
         limits.max_storage_buffer_binding_size = u32::MAX;
          */
+        
         if let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())){
             if let Ok(daq) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor{
                 label: None,
-                features: wgpu::Features::SHADER_F16,
+                features: Default::default(),
                 limits: limits,
             }, None)){
                 wgpu_daq = Some(daq);
             }
         }
-
+ 
         return AsciaEngine{
             genesis_local: ObjectNode::new("genesis"),
             genesis_global: ObjectNode{
                 tag: "genesis".to_string(),
-                attribute: Rc::new(RefCell::new(PresetObjectNodeAttribute::Normal())),
+                attribute: Rc::new(RefCell::new(None)),
                 position: Default::default(),
                 direction: Default::default(),
                 polygons: vec![],
@@ -966,11 +1035,15 @@ impl AsciaEngine{
         }
     }
 
-    pub fn render(&self, camera_node: &ObjectNode<Global>){
-        if let PresetObjectNodeAttribute::Camera(camera) = &*camera_node.attribute.borrow() {
-            let result = camera.render(camera_node, self);
-            self.viewport.borrow_mut().display(&result);
+    pub fn render(&self, camera_node: &ObjectNode<E, Global>) -> Result<(), String>{
+        if let Some(a) = &*camera_node.attribute.borrow(){
+            if let Some(camera) = a.camera(){
+                let result = camera.render(camera_node, self);
+                self.viewport.borrow_mut().display(&result);
+                return Ok(());
+            }
         }
+        return Err("given node does not contain camera attribute".to_string());
     }
 
     pub fn engine_time(&self) -> Duration{

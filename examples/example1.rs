@@ -13,8 +13,7 @@ use std::time::{Duration, Instant};
 use ascia::ascia::camera::{SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::camera_gpu::GPUWrapper;
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{AsciaEngine, FlatMaterial, LambertMaterial, LambertWithShadowMaterial, Local, Material, ObjectNode, PresetObjectNodeAttribute, PresetCamera, PresetLight, PresetMaterial, ObjectNodeAttribute};
-use ascia::ascia::core::PresetObjectNodeAttribute::Camera;
+use ascia::ascia::core::{AsciaEngine, FlatMaterial, LambertMaterial, LambertWithShadowMaterial, Local, Material, ObjectNode, PresetCamera, PresetLight, PresetMaterial, ObjectNodeAttribute, PresetObjectNodeAttributeDispatcher, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment};
 use ascia::ascia::lights::{PointLight};
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
@@ -46,7 +45,7 @@ fn main() {
         z:25.0
     };
     
-    let mut cube_1 = ObjectNode::from("cube 1", PrimitiveGenerator::cube(6.0,PresetMaterial::Lambert(LambertMaterial{
+    let mut cube_1 = ObjectNode::from("cube 1", PrimitiveGenerator::cube(6.0,PresetMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
@@ -62,7 +61,7 @@ fn main() {
     
     null_container.add_child(cube_1);
 
-    let mut cube_2 = ObjectNode::from("cube 2", PrimitiveGenerator::cube(6.0,PresetMaterial::Lambert(LambertMaterial{
+    let mut cube_2 = ObjectNode::from("cube 2", PrimitiveGenerator::cube(6.0,PresetMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
@@ -77,7 +76,7 @@ fn main() {
     };
     null_container.add_child(cube_2);
     
-    let mut cube_3 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0,PresetMaterial::Lambert(LambertMaterial{
+    let mut cube_3 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0,PresetMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
@@ -93,7 +92,7 @@ fn main() {
     };
     null_container.add_child(cube_3);
 
-    let mut cube_4 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0,PresetMaterial::Lambert(LambertMaterial{
+    let mut cube_4 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0,PresetMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
@@ -109,7 +108,7 @@ fn main() {
     };
     null_container.add_child(cube_4);
     
-    let mut red_square = ObjectNode::from("red square", PrimitiveGenerator::square(20.0,PresetMaterial::LambertWithShadow(
+    let mut red_square = ObjectNode::from("red square", PrimitiveGenerator::square(20.0,PresetMaterial::LambertWithShadowMaterial(
         LambertWithShadowMaterial{
             color: ColorRGBf32{
                 r: 1.0,
@@ -122,7 +121,7 @@ fn main() {
     
     null_container.add_child(red_square);
 
-    let mut green_square = ObjectNode::from("green square", PrimitiveGenerator::square(20.0,PresetMaterial::Flat(
+    let mut green_square = ObjectNode::from("green square", PrimitiveGenerator::square(20.0,PresetMaterial::FlatMaterial(
         FlatMaterial{
             color: ColorRGBf32{
                 r: 0.0,
@@ -141,7 +140,7 @@ fn main() {
     },-PI * 0.5, 1.0);
     null_container.add_child(green_square);
 
-    let mut blue_square = ObjectNode::from("blue square", PrimitiveGenerator::square(20.0,PresetMaterial::LambertWithShadow(
+    let mut blue_square = ObjectNode::from("blue square", PrimitiveGenerator::square(20.0,PresetMaterial::LambertWithShadowMaterial(
         LambertWithShadowMaterial{
             color: ColorRGBf32{
                 r: 0.0,
@@ -154,7 +153,7 @@ fn main() {
     null_container.add_child(blue_square);
     
     for i in 0..64{
-        let mut tiny_cube = ObjectNode::from(&format!("tiny cube {}", i), PrimitiveGenerator::cube(10.0,PresetMaterial::LambertWithShadow(
+        let mut tiny_cube = ObjectNode::from(&format!("tiny cube {}", i), PrimitiveGenerator::cube(10.0,PresetMaterial::LambertWithShadowMaterial(
             LambertWithShadowMaterial{
                 color: ColorRGBu8{
                     r: ((16i32 * (32i32 - i)) % 255i32) as u8,
@@ -180,7 +179,7 @@ fn main() {
         null_container.add_child(tiny_cube);
     }
     
-    let pointlight = PresetLight::Point(PointLight{
+    let pointlight = PresetLight::PointLight(PointLight{
         color: ColorRGBf32{
             r: 1.0,
             g: 1.0,
@@ -190,7 +189,7 @@ fn main() {
     });
 
     let mut light = ObjectNode::new("light");
-    light.attribute = Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(pointlight)));
+    light.attribute = PresetObjectNodeAttributeDispatcher::Light(pointlight).make_shared();
     light.position.x = 30.0;
     light.position.y = 30.0;
     light.position.z = -30.0;
@@ -283,26 +282,26 @@ fn create_stdin_controller() -> Option<File>{
         return None;
     }
 }
-
-fn available_cameras(engine: &AsciaEngine) -> Vec<Rc<RefCell<PresetObjectNodeAttribute>>>{
+fn available_cameras(engine: &AsciaEngine<PresetAsciaEnvironment>) -> Vec<Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>>{
     let aov = (PI / 3.0, PI / 4.0);
 
     let mut cameras = vec![
-        SimpleCamera::new(aov, 1).make_attribute_enum(),
-        SimpleBVHCamera::new(aov, 1).make_attribute_enum(),
-        SimpleCamera::new(aov, 3).make_attribute_enum(),
-        SimpleBVHCamera::new(aov, 3).make_attribute_enum(),
+        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
+        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
+        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
+        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
     ];
+
     if engine.wgpu_daq.is_some(){
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleCamera<PresetAsciaEnvironment>>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleBVHCamera<PresetAsciaEnvironment>>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleCamera<PresetAsciaEnvironment>>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleBVHCamera<PresetAsciaEnvironment>>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum().make_shared());
     }
     return cameras;
 }
 
-fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:f32, rotation_speed:f32, cameras: &Vec<Rc<RefCell<PresetObjectNodeAttribute>>>, mut now_camera_index: &mut usize){
+fn move_camera(mut cam_objn: &mut ObjectNode<PresetAsciaEnvironment, Local>, input: &mut File, velocity:f32, rotation_speed:f32, cameras: &Vec<Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>>, mut now_camera_index: &mut usize){
     let mut v = vec![0;1];
     if let Err(e) = input.read_to_end(&mut v){
         println!("{}",e);
@@ -358,7 +357,7 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
-            } ,rotation_speed, 1.0);
+            },rotation_speed, 1.0);
         }
         else if *c == b'k'{
             cam_objn.direction = d * Quaternion::new(&Vec3{
@@ -372,14 +371,14 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            }, -rotation_speed, 1.0) * d;
+            },-rotation_speed, 1.0) * d;
         }
         else if *c == b'l'{
             cam_objn.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
                 z: 0.0,
-            }, rotation_speed, 1.0) * d;
+            },rotation_speed, 1.0) * d;
         }
         else if *c == b'v'{
             *now_camera_index = if *now_camera_index + 1 >= cameras.len() { 0 } else { *now_camera_index + 1 };
@@ -388,13 +387,13 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
     }
 }
 
-fn camera_info(attr: &Rc<RefCell<PresetObjectNodeAttribute>>) -> String{
-    if let Camera(c) = &*RefCell::borrow(attr){
+fn camera_info(attr: &Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>) -> String{
+    if let Some(PresetObjectNodeAttributeDispatcher::Camera(c)) = &*RefCell::borrow(attr){
         return match c {
-            PresetCamera::Simple(cam) => { format!("simple cpu {}x", cam.sampling_size) }
-            PresetCamera::SimpleGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
-            PresetCamera::SimpleBVH(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
-            PresetCamera::SimpleBVHGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
+            PresetCamera::SimpleCamera(cam) => { format!("simple cpu {}x", cam.sampling_size) }
+            PresetCamera::SimpleCameraGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
+            PresetCamera::SimpleBVHCamera(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
+            PresetCamera::SimpleBVHCameraGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
         };
     }
     return "unknown".to_string();

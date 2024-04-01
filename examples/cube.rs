@@ -15,8 +15,7 @@ use wgpu::ShaderModuleDescriptor;
 use ascia::ascia::camera::{NaiveBVH, SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::camera_gpu::GPUWrapper;
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{AsciaEngine, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, Polygon, PresetCamera, PresetLight, PresetMaterial, PresetObjectNodeAttribute};
-use ascia::ascia::core::PresetObjectNodeAttribute::{Camera, Light};
+use ascia::ascia::core::{AsciaEngine, LambertMaterial, LambertWithShadowMaterial, Light, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetCamera, PresetLight, PresetMaterial, PresetObjectNodeAttributeDispatcher};
 use ascia::ascia::lights::PointLight;
 use ascia::ascia::math::{Matrix33, Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
@@ -46,11 +45,12 @@ fn main() {
         y:0.0,
         z:100.0
     };
+    
 
-    let cube = ObjectNode::from("cube 1",PrimitiveGenerator::cube(50.0,PresetMaterial::Lambert(LambertMaterial{
+    let cube = ObjectNode::from("cube 1",PrimitiveGenerator::cube(50.0, PresetMaterial::LambertWithShadowMaterial(LambertWithShadowMaterial{
         color: ColorRGBf32{
             r: 1.0,
-            g: 1.0,
+            g: 0.0,
             b: 1.0,
         },
         priority: 0,
@@ -62,14 +62,14 @@ fn main() {
     let mut light_objn = ObjectNode::new("light");
     light_objn.position.y = 100.0;
     light_objn.position.z = -100.0;
-    light_objn.attribute = PointLight {
+    light_objn.attribute = PresetObjectNodeAttributeDispatcher::from(PointLight{
         color: ColorRGBu8 {
             r: 255,
             g: 255,
             b: 255
         }.into(),
         power: 1.0,
-    }.make_attribute_enum();
+    }).make_shared();
     engine.genesis_local.add_child(light_objn);
 
     let mut input = create_stdin_controller().unwrap();
@@ -116,25 +116,26 @@ fn create_stdin_controller() -> Option<File>{
     }
 }
 
-fn available_cameras(engine: &AsciaEngine) -> Vec<Rc<RefCell<PresetObjectNodeAttribute>>>{
+fn available_cameras(engine: &AsciaEngine<PresetAsciaEnvironment>) -> Vec<Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>>{
     let aov = (PI / 3.0, PI / 4.0);
 
     let mut cameras = vec![
-        SimpleCamera::new(aov, 1).make_attribute_enum(),
-        SimpleBVHCamera::new(aov, 1).make_attribute_enum(),
-        SimpleCamera::new(aov, 3).make_attribute_enum(),
-        SimpleBVHCamera::new(aov, 3).make_attribute_enum(),
+        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
+        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
+        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
+        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
     ];
+    
     if engine.wgpu_daq.is_some(){
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleCamera>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum());
-        cameras.push(GPUWrapper::<SimpleBVHCamera>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleCamera<PresetAsciaEnvironment>>::generate(SimpleCamera::new(aov, 1), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleBVHCamera<PresetAsciaEnvironment>>::generate(SimpleBVHCamera::new(aov, 1), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleCamera<PresetAsciaEnvironment>>::generate(SimpleCamera::new(aov, 3), &engine).make_attribute_enum().make_shared());
+        cameras.push(GPUWrapper::<PresetAsciaEnvironment, SimpleBVHCamera<PresetAsciaEnvironment>>::generate(SimpleBVHCamera::new(aov, 3), &engine).make_attribute_enum().make_shared());
     }
     return cameras;
 }
 
-fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:f32, rotation_speed:f32, cameras: &Vec<Rc<RefCell<PresetObjectNodeAttribute>>>, mut now_camera_index: &mut usize){
+fn move_camera(mut cam_objn: &mut ObjectNode<PresetAsciaEnvironment, Local>, input: &mut File, velocity:f32, rotation_speed:f32, cameras: &Vec<Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>>, mut now_camera_index: &mut usize){
     let mut v = vec![0;1];
     if let Err(e) = input.read_to_end(&mut v){
         println!("{}",e);
@@ -220,13 +221,13 @@ fn move_camera(mut cam_objn: &mut ObjectNode<Local>, input: &mut File, velocity:
     }
 }
 
-fn camera_info(attr: &Rc<RefCell<PresetObjectNodeAttribute>>) -> String{
-    if let Camera(c) = &*RefCell::borrow(attr){
+fn camera_info(attr: &Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>) -> String{
+    if let Some(PresetObjectNodeAttributeDispatcher::Camera(c)) = &*RefCell::borrow(attr){
         return match c {
-            PresetCamera::Simple(cam) => { format!("simple cpu {}x", cam.sampling_size) }
-            PresetCamera::SimpleGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
-            PresetCamera::SimpleBVH(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
-            PresetCamera::SimpleBVHGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
+            PresetCamera::SimpleCamera(cam) => { format!("simple cpu {}x", cam.sampling_size) }
+            PresetCamera::SimpleCameraGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
+            PresetCamera::SimpleBVHCamera(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
+            PresetCamera::SimpleBVHCameraGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
         };
     }
     return "unknown".to_string();

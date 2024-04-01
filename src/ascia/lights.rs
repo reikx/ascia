@@ -1,22 +1,38 @@
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use crate::ascia::color::ColorRGBf32;
-use crate::ascia::core::{Global, Light, ObjectNode, ObjectNodeAttribute, PresetLight, PresetObjectNodeAttribute};
+use crate::ascia::core::{AsciaEnvironment, Global, Light, LightDispatcher, ObjectNode, ObjectNodeAttribute, PresetAsciaEnvironment, PresetLight, PresetObjectNodeAttributeDispatcher};
 use crate::ascia::math::{Vec3};
 
-pub struct PointLight {
+pub struct PointLight{
     pub color: ColorRGBf32,
-    pub power: f32
+    pub power: f32,
 }
 
-impl ObjectNodeAttribute for PointLight {
-    fn make_attribute_enum(self) -> Rc<RefCell<PresetObjectNodeAttribute>> {
-        return Rc::new(RefCell::new(PresetObjectNodeAttribute::Light(PresetLight::Point(self))));
+impl Default for PointLight{
+    fn default() -> Self {
+        PointLight{
+            color: ColorRGBf32{
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+            },
+            power: 1.0,
+        }
     }
 }
 
-impl Light for PointLight{
-    fn ray(&self, node:&ObjectNode<Global>, to: &Vec3) -> ColorRGBf32 {
+impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<E>, Lights = PresetLight>> From<PointLight> for PresetObjectNodeAttributeDispatcher<E>{
+    fn from(value: PointLight) -> PresetObjectNodeAttributeDispatcher<E> {
+        <PresetLight as LightDispatcher<E>>::make_attribute_enum(PresetLight::PointLight(value))
+    }
+}
+
+impl<E: AsciaEnvironment> ObjectNodeAttribute<E> for PointLight{}
+
+impl<E: AsciaEnvironment> Light<E> for PointLight{
+    fn ray(&self, node:&ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32 {
         let distance = (*to - node.position).norm();
         if distance == 0.0{
             return ColorRGBf32 {
