@@ -30,7 +30,7 @@ pub trait ObjectNodeAttribute<E: AsciaEnvironment + ?Sized>{
 }
 
 pub trait Material<E: AsciaEnvironment + ?Sized, CA: Camera<E> + ?Sized, RT: RaytracingTarget<0>>: Clone{
-    fn calc_color(&self, intersection: &RT::Intersection, engine: &AsciaEngine<E>, camera:&CA, camera_node: &ObjectNode<E,Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
+    fn calc_color<'a>(&self, intersection: &RT::Intersection<'a>, engine: &AsciaEngine<E>, camera:&CA, camera_node: &ObjectNode<E,Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
     fn make_material_dispatcher<'a>(self) -> E::Materials where (E::Materials): From<Self>{
         E::Materials::from(self)
     }
@@ -38,7 +38,7 @@ pub trait Material<E: AsciaEnvironment + ?Sized, CA: Camera<E> + ?Sized, RT: Ray
 
 pub trait MaterialCollection: Default{}
 pub trait MaterialDispatcher<'a, E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>: Camera<E>{
-    fn calc_color(&self, intersection: &'a RT::Intersection, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &RT::Intersection<'a>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
 }
 
 pub trait Camera<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
@@ -181,7 +181,7 @@ impl AsciaEnvironment for PresetAsciaEnvironment{
     type ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<Self>;
 }
 
-pub trait CoordinateType{}
+pub trait CoordinateType where Self: 'static{}
 
 pub struct Local{}
 
@@ -254,7 +254,7 @@ pub struct Ray{
 }
 
 impl Ray{
-    pub fn project<const RC: usize, T: RaytracingTarget<RC>, F: Fn(&T::Intersection) -> bool>(&self, target: T, exclude_cond: &F) -> Option<T::Intersection>{
+    pub fn project<'a, const RC: usize, T: RaytracingTarget<RC>, F: Fn(&T::Intersection<'a>) -> bool>(&self, target: &'a T, exclude_cond: &F) -> Option<T::Intersection<'a>>{
         return target.project_by(self, exclude_cond);
     }
 }
@@ -362,8 +362,8 @@ impl<'a> RayIntersection for AABB3DRayIntersection{
 }
 
 pub trait RaytracingTarget<const RECURSION_COUNT: usize>{
-    type Intersection: RayIntersection;
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>;
+    type Intersection<'b>: RayIntersection where Self: 'b;
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>>;
 }
 
 #[derive(Debug, Copy)]
@@ -375,10 +375,10 @@ pub struct Polygon<E: AsciaEnvironment + ?Sized + 'static, CO: CoordinateType>{
 
 
 
-impl<'a, E:AsciaEnvironment + ?Sized + 'static, CO:CoordinateType> RaytracingTarget<0> for &'a Polygon<E, CO>{
-    type Intersection = PolygonRayIntersection<'a, E, CO>;
+impl<E:AsciaEnvironment + ?Sized + 'static, CO:CoordinateType> RaytracingTarget<0> for Polygon<E, CO>{
+    type Intersection<'a> = PolygonRayIntersection<'a, E, CO>;
 
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>> {
         let m2 = Matrix33{
             v1: self.poses.v1 - ray.position,
             v2: self.poses.v2 - ray.position,
@@ -412,10 +412,10 @@ impl<'a, E:AsciaEnvironment + ?Sized + 'static, CO:CoordinateType> RaytracingTar
     }
 }
 
-impl<'a, E:AsciaEnvironment + ?Sized, C:CoordinateType> RaytracingTarget<0> for &'a CParticle<E, C>{
-    type Intersection = CParticleRayIntersection<'a, E, C>;
+impl<E:AsciaEnvironment + ?Sized, C:CoordinateType> RaytracingTarget<0> for CParticle<E, C>{
+    type Intersection<'a> = CParticleRayIntersection<'a, E, C>;
 
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>> {
         let a = self.position - ray.position;
         let k = (ray.direction * a) / (ray.direction * ray.direction);
         let d = (a - k * ray.direction).norm();
@@ -452,9 +452,9 @@ impl<'a, E:AsciaEnvironment + ?Sized, C:CoordinateType> RaytracingTarget<0> for 
 }
 
 impl RaytracingTarget<0> for AABB3D{
-    type Intersection = AABB3DRayIntersection;
+    type Intersection<'a> = AABB3DRayIntersection;
 
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>> {
         let v0 = Vec3{
             x: (self.a.x - ray.position.x) / ray.direction.x,
             y: (self.a.y - ray.position.y) / ray.direction.y,
@@ -491,12 +491,12 @@ impl RaytracingTarget<0> for AABB3D{
     }
 }
 
-impl<'a,T: RaytracingTarget<0>> RaytracingTarget<1> for &'a [T] {
-    type Intersection = T::Intersection;
+impl<T: RaytracingTarget<0>> RaytracingTarget<1> for [T] {
+    type Intersection<'a> = T::Intersection<'a> where T: 'a;
 
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection> {
-        let mut nearest:Option<Self::Intersection> = None;
-        for iter in *self{
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>> {
+        let mut nearest:Option<Self::Intersection<'a>> = None;
+        for iter in self{
             if let Some(i) = iter.project_by(ray, exclude_cond){
                 if let Some(j) = &nearest{
                     if i.depth() < j.depth(){
@@ -515,12 +515,12 @@ impl<'a,T: RaytracingTarget<0>> RaytracingTarget<1> for &'a [T] {
 
 
 
-impl<'a,T> RaytracingTarget<1> for &'a Vec<T> where &'a T: RaytracingTarget<0> {
-    type Intersection = <&'a T as RaytracingTarget<0>>::Intersection;
+impl<T> RaytracingTarget<1> for Vec<T> where T: RaytracingTarget<0> {
+    type Intersection<'a> = <T as RaytracingTarget<0>>::Intersection<'a> where T: 'a;
 
-    fn project_by<F: Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection>{
-        let mut nearest:Option<Self::Intersection> = None;
-        for iter in *self{
+    fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>>{
+        let mut nearest:Option<Self::Intersection<'a>> = None;
+        for iter in self{
             if let Some(i) = iter.project_by(ray, exclude_cond){
                 if let Some(j) = &nearest{
                     if i.depth() < j.depth(){

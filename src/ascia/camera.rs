@@ -11,12 +11,12 @@ use crate::ascia::color::{ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 
 impl<E: AsciaEnvironment, CA:Camera<E>, RT: RaytracingTarget<0>> Material<E, CA, RT> for FlatMaterial{
-    fn calc_color(&self, intersection: &RT::Intersection, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+    fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         return (self.color, self.priority);
     }
 }
 
-impl<'a, E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, &'a Polygon<E, Global>> for &LambertMaterial{
+impl<'a, E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &LambertMaterial{
     fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
@@ -38,7 +38,7 @@ impl<'a, E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, &'a Polygon<E, Globa
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Material<E, SimpleCamera<E>, &'a Polygon<E, Global>> for &LambertWithShadowMaterial{
+impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Material<E, SimpleCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
     fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
@@ -75,7 +75,7 @@ impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> 
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> Material<E, SimpleBVHCamera<E>, &'a Polygon<E, Global>> for &LambertWithShadowMaterial{
+impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> Material<E, SimpleBVHCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
     fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleBVHCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         let mut result = ColorRGBf32{
             r:0.0,
@@ -110,7 +110,7 @@ impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> Material<E, SimpleBVHC
 
 // auto deref specialization
 impl<'a, E: AsciaEnvironment, CA: Camera<E>, RT: RaytracingTarget<0>> Material<E, CA, RT> for LambertWithShadowMaterial{
-    fn calc_color(&self, intersection: &RT::Intersection, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+    fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         todo!()
     }
 }
@@ -152,10 +152,10 @@ impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatc
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> MaterialDispatcher<'a, E, &'a Polygon<E, Global>> for SimpleCamera<E>{
-    fn calc_color(&self, intersection: &'a PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> MaterialDispatcher<'a, E, Polygon<E, Global>> for SimpleCamera<E>{
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         match intersection.polygon.material {
-            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleCamera<E>, &'a Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
+            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleCamera<E>, Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
             PresetMaterial::LambertMaterial(m) => {(&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
             PresetMaterial::LambertWithShadowMaterial(m) => {(&&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
         }
@@ -435,17 +435,17 @@ impl<E:AsciaEnvironment> NaiveBVH<CParticle<E, Global>>{
 }
 
 
-impl<'a, T> RaytracingTarget<1> for &'a NaiveBVH<T> where &'a T : RaytracingTarget<0> {
-    type Intersection = <&'a T as RaytracingTarget<0>>::Intersection;
-    fn project_by<F:Fn(&Self::Intersection) -> bool>(&self, ray: &Ray, f: &F) -> Option<Self::Intersection> {
-        let mut nearest:Option<Self::Intersection> = None;
+impl<T> RaytracingTarget<1> for NaiveBVH<T> where T : RaytracingTarget<0> {
+    type Intersection<'a> = <T as RaytracingTarget<0>>::Intersection<'a> where T: 'a;
+    fn project_by<'a, F:Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, f: &F) -> Option<Self::Intersection<'a>> {
+        let mut nearest:Option<Self::Intersection<'a>> = None;
         let mut stack: VecDeque<usize> = VecDeque::new();
         stack.push_back(1);
 
         while !stack.is_empty() {
             let i = *stack.back().unwrap();
             if let Some(aabb) = &self.buf[i]{
-                if let Some(r) = ray.project(*aabb, &|i|{false}){
+                if let Some(r) = ray.project(aabb, &|i|{false}){
                     if self.buf.len() / 2 <= i{
                         if let Some(r1) = (&self.data[i - (self.buf.len() / 2)]).project_by(&ray, f){
                             if let Some(r2) = &nearest{
@@ -528,10 +528,10 @@ impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatc
 }
 
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> MaterialDispatcher<'a, E, &'a Polygon<E, Global>> for SimpleBVHCamera<E>{
-    fn calc_color(&self, intersection: &'a PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> MaterialDispatcher<'a, E, Polygon<E, Global>> for SimpleBVHCamera<E>{
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         match intersection.polygon.material {
-            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleBVHCamera<E>, &'a Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
+            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleBVHCamera<E>, Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
             PresetMaterial::LambertMaterial(m) => {(&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
             PresetMaterial::LambertWithShadowMaterial(m) => {(&&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
         }
