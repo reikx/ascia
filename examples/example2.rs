@@ -8,12 +8,12 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use ascia::ascia::camera::{SimpleBVHCamera, SimpleCamera};
-use ascia::ascia::camera_gpu::GPUWrapper;
 use ascia::ascia::color::ColorRGBf32;
-use ascia::ascia::core::{AsciaEngine, CameraDispatcher, FlatMaterial, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetCamera, PresetMaterial, PresetObjectNodeAttributeDispatcher};
+use ascia::ascia::core::{CameraDispatcher, FlatMaterial, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetCamera, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine};
 use ascia::ascia::lights::{PointLight};
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
+use ascia::ascia::util::preset_camera_info;
 
 struct FlashingFloor{
     size: f32,
@@ -147,7 +147,7 @@ impl FlashingFloor {
 
 
         for p in &mut self_objn.polygons{
-            if let PresetMaterial::LambertMaterial(m) = &mut p.material{
+            if let PresetPolygonMaterial::LambertMaterial(m) = &mut p.material{
                 m.color = ColorRGBf32{
                     r: s,
                     g: s,
@@ -160,16 +160,20 @@ impl FlashingFloor {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    
     let width:usize = if cfg!(debug_assertions) { 140 } else { usize::from_str(&args[1]).unwrap() };
     let height:usize = if cfg!(debug_assertions) { 40 } else { usize::from_str(&args[2]).unwrap() };
-    let mut engine = AsciaEngine::new(width,height);
+
+    let fps_upper_limit :u64 = 30;
+
+    let mut engine = AsciaEngine::new(width, height);
 
     let cube_size = 10.0;
 
     let mut cubes = vec![];
     for i in 0..32{
         let label = format!("cube {}", i);
-        engine.genesis_local.add_child(ObjectNode::from(&label, PrimitiveGenerator::cube(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default()))));
+        engine.genesis_local.add_child(ObjectNode::from(&label, PrimitiveGenerator::cube(cube_size, PresetPolygonMaterial::LambertMaterial(LambertMaterial::default()))));
         cubes.push(RollingCube::new(cube_size, &label, engine.engine_time(), Duration::new(0, 500000000)));
     }
 
@@ -177,7 +181,7 @@ fn main() {
     let mut floors = VecDeque::new();
     for i in 0..32{
         let label = format!("floor {} {}", cubes[i].current_grid.0, cubes[i].current_grid.1);
-        let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default())));
+        let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetPolygonMaterial::LambertMaterial(LambertMaterial::default())));
         f.position = Vec3{
             x: (cubes[i].current_grid.0 as f32 + 0.5) * cube_size,
             y: 0.0,
@@ -229,13 +233,13 @@ fn main() {
     engine.genesis_local.add_child(light_objn);
 
     let mut last_time = Instant::now();
-    for _i in 0..65536 {
+    loop {
         engine.sync_engine_time();
         let engine_time = engine.engine_time();
         for c in &mut cubes{
             let label = format!("floor {} {}", c.current_grid.0, c.current_grid.1);
             if engine.genesis_local.child(&label).is_none(){
-                let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetMaterial::LambertMaterial(LambertMaterial::default())));
+                let mut f = ObjectNode::from(&label, PrimitiveGenerator::square(cube_size, PresetPolygonMaterial::LambertMaterial(LambertMaterial::default())));
                 f.position = Vec3{
                     x: (c.current_grid.0 as f32 + 0.5) * cube_size,
                     y: 0.0,
@@ -276,28 +280,17 @@ fn main() {
         engine.update_global_nodes();
         engine.render(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap());
 
-        let mut dur = last_time.elapsed();
-        if dur.as_millis() < 10{
-            thread::sleep(Duration::from_millis(5));
-            dur = last_time.elapsed();
+        if (last_time.elapsed().as_millis() as u64) < (1000 / fps_upper_limit){
+            thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
+
+        let mut dur = last_time.elapsed();
         println!("fps:{}      ",1000 / dur.as_millis());
-        println!("current camera: {}     ", camera_info(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap().attribute));
+        println!("current camera: {}     ", preset_camera_info(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap().attribute));
 
         last_time = Instant::now();
     }
 }
 
-fn camera_info(attr: &Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>) -> String{
-    if let Some(PresetObjectNodeAttributeDispatcher::Camera(c)) = &*RefCell::borrow(attr){
-        return match c {
-            PresetCamera::SimpleCamera(cam) => { format!("simple cpu {}x", cam.sampling_size) }
-            PresetCamera::SimpleCameraGPU(cam) => { format!("simple gpu {}x", cam.cpu_camera.sampling_size) }
-            PresetCamera::SimpleBVHCamera(cam) => { format!("simple cpu bvh {}x", cam.sampling_size) }
-            PresetCamera::SimpleBVHCameraGPU(cam) => { format!("simple gpu bvh {}x", cam.cpu_camera.sampling_size)}
-        };
-    }
-    return "unknown".to_string();
-}
 
 

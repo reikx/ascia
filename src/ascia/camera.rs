@@ -5,19 +5,22 @@ use std::f32::consts::PI;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use crate::ascia::charmapper;
-use crate::ascia::core::{AsciaEngine, Camera, CParticle, CParticleMode, CParticleRayIntersection, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, Light, Material, ObjectNode, Polygon, PolygonRayIntersection, Ray, RaytracingTarget, RayIntersection, RenderChar, PresetMaterial, PresetCamera, ObjectNodeAttribute, AsciaEnvironment, ObjectNodeAttributeDispatcher, LightDispatcher, MaterialDispatcher, PresetObjectNodeAttributeDispatcher, CameraDispatcher, PresetLight};
+use crate::ascia::core::{AsciaEngine, Camera, CParticle, CParticleMode, CParticleRayIntersection, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, Light, Material, ObjectNode, Polygon, PolygonRayIntersection, Ray, RaytracingTarget, RayIntersection, RenderChar, PresetPolygonMaterial, PresetCamera, ObjectNodeAttribute, AsciaEnvironment, ObjectNodeAttributeDispatcher, LightDispatcher, MaterialDispatcher, PresetObjectNodeAttributeDispatcher, CameraDispatcher, PresetLight, PresetCParticleMaterial};
 use crate::ascia::math::{AABB3D, Vec3};
 use crate::ascia::color::{ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 
-impl<E: AsciaEnvironment, CA:Camera<E>, RT: RaytracingTarget<0>> Material<E, CA, RT> for FlatMaterial{
-    fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
-        return (self.color, self.priority);
+impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &FlatMaterial{
+    type Output = (ColorRGBf32, u32);
+
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+        (self.color, self.priority)
     }
 }
 
-impl<'a, E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &LambertMaterial{
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &LambertMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
             if let Some(a) = &*node.attribute.borrow(){
@@ -38,8 +41,9 @@ impl<'a, E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> 
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Material<E, SimpleCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<'a, E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Material<E, SimpleCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
             if let Some(a) = &*node.attribute.borrow(){
@@ -75,8 +79,9 @@ impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> 
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> Material<E, SimpleBVHCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleBVHCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Material<E, SimpleBVHCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleBVHCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32{
             r:0.0,
             g:0.0,
@@ -109,21 +114,43 @@ impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> Material<E, SimpleBVHC
 }
 
 // auto deref specialization
-impl<'a, E: AsciaEnvironment, CA: Camera<E>, RT: RaytracingTarget<0>> Material<E, CA, RT> for LambertWithShadowMaterial{
-    fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
+impl<'a, E: AsciaEnvironment, CA: Camera<E>> Material<E, CA, Polygon<E, Global>> for LambertWithShadowMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output {
+        unimplemented!()
+    }
+}
+
+impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &FlatMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+        return (self.color, self.priority);
+    }
+}
+
+impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &LambertMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+        todo!()
+    }
+}
+
+impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &LambertWithShadowMaterial{
+    type Output = (ColorRGBf32, u32);
+    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         todo!()
     }
 }
 
 
 
-pub struct SimpleCamera<E: AsciaEnvironment<Materials = PresetMaterial>>{
+pub struct SimpleCamera<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial>>{
     pub angle_of_view: (f32, f32),
     pub sampling_size: u32,
     pub ph: PhantomData<E>
 }
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial>> Default for SimpleCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial>> Default for SimpleCamera<E>{
     fn default() -> Self {
         return SimpleCamera{
             angle_of_view: (PI / 3.0,PI / 4.0),
@@ -133,7 +160,7 @@ impl<E: AsciaEnvironment<Materials = PresetMaterial>> Default for SimpleCamera<E
     }
 }
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial>> SimpleCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial>> SimpleCamera<E>{
     pub fn new(angle_of_view: (f32,f32), sampling_size:u32) -> SimpleCamera<E>{
         return SimpleCamera{
             angle_of_view: angle_of_view,
@@ -144,25 +171,47 @@ impl<E: AsciaEnvironment<Materials = PresetMaterial>> SimpleCamera<E>{
 }
 
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> ObjectNodeAttribute<E> for SimpleCamera<E> {}
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, Lights = PresetLight>> ObjectNodeAttribute<E> for SimpleCamera<E> {}
 
-impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<E>, Materials = PresetMaterial, Cameras = PresetCamera<E>, Lights = PresetLight>> From<SimpleCamera<E>> for PresetObjectNodeAttributeDispatcher<E> {
+impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<E>, PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Cameras = PresetCamera<E>, Lights = PresetLight>> From<SimpleCamera<E>> for PresetObjectNodeAttributeDispatcher<E> {
     fn from(value: SimpleCamera<E>) -> Self {
         PresetCamera::SimpleCamera(value).make_attribute_enum()
     }
 }
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> MaterialDispatcher<'a, E, Polygon<E, Global>> for SimpleCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> MaterialDispatcher<E, Polygon<E, Global>> for SimpleCamera<E>{
     fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         match intersection.polygon.material {
-            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleCamera<E>, Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
-            PresetMaterial::LambertMaterial(m) => {(&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
-            PresetMaterial::LambertWithShadowMaterial(m) => {(&&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
+            PresetPolygonMaterial::FlatMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetPolygonMaterial::LambertMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetPolygonMaterial::LambertWithShadowMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
         }
     }
 }
 
-impl<E:AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Camera<E> for SimpleCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> MaterialDispatcher<E, CParticle<E, Global>> for SimpleCamera<E>{
+    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) ->  (ColorRGBf32, u32) {
+        match intersection.particle.material {
+            PresetCParticleMaterial::FlatMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetCParticleMaterial::LambertMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetCParticleMaterial::LambertWithShadowMaterial(m) => {
+                <_ as Material<E, SimpleCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+        }
+    }
+}
+
+impl<E:AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Camera<E> for SimpleCamera<E>{
     fn render(&self, node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>> {
         let height = engine.viewport.borrow().height();
         let width = engine.viewport.borrow().width();
@@ -214,14 +263,13 @@ impl<E:AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Camer
                     let mut depth = f32::MAX;
                     if let Some(intersection) = &polygon_intersections[x][y]{
                         output[y][x].c = '#';
-                        output[y][x].color = self.calc_color(intersection, engine, node, &global_polygons).0.into();
+                        output[y][x].color = <_ as MaterialDispatcher<E, Polygon<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
                         depth = intersection.depth;
                     }
                     if let Some(intersection) = &c_particle_intersections[x][y]{
-                        if intersection.depth < depth{
-                            output[y][x].c = intersection.particle.c;
-                            output[y][x].color = intersection.particle.color.into();
-                        }
+                        output[y][x].c = intersection.particle.c;
+                        output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
+                        depth = intersection.depth;
                     }
                 }
             }
@@ -283,7 +331,7 @@ impl<E:AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Camer
                             }
                             seg <<= 1;
                             if let Some(intersection) = &polygon_intersections[x * 3 + j][y * 3 + i] {
-                                material_results[k] = self.calc_color(intersection, engine, node, &global_polygons);
+                                material_results[k] = <_ as MaterialDispatcher<E, Polygon<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons);
                                 if max_priority < material_results[k].1{
                                     max_priority = material_results[k].1;
                                     seg = 0;
@@ -317,12 +365,12 @@ impl<E:AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Camer
                         if let Some(first) = &polygon_intersections[x * 3][y * 3]{
                             if intersection.depth < first.depth{
                                 output[y][x].c = intersection.particle.c;
-                                output[y][x].color = intersection.particle.color.into();
+                                output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
                             }
                         }
                         else{
                             output[y][x].c = intersection.particle.c;
-                            output[y][x].color = intersection.particle.color.into();
+                            output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
                         }
                     }
                 }
@@ -521,24 +569,45 @@ impl<E: AsciaEnvironment> SimpleBVHCamera<E>{
 
 impl<E: AsciaEnvironment> ObjectNodeAttribute<E> for SimpleBVHCamera<E> {}
 
-impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<E>, Materials = PresetMaterial, Lights = PresetLight, Cameras = PresetCamera<E>>> From<SimpleBVHCamera<E>> for PresetObjectNodeAttributeDispatcher<E> {
+impl<E: AsciaEnvironment<ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<E>, PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight, Cameras = PresetCamera<E>>> From<SimpleBVHCamera<E>> for PresetObjectNodeAttributeDispatcher<E> {
     fn from(value: SimpleBVHCamera<E>) -> Self {
         PresetCamera::SimpleBVHCamera(value).make_attribute_enum()
     }
 }
 
 
-impl<'a, E: AsciaEnvironment<Materials = PresetMaterial>> MaterialDispatcher<'a, E, Polygon<E, Global>> for SimpleBVHCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> MaterialDispatcher<E, Polygon<E, Global>> for SimpleBVHCamera<E>{
     fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32) {
         match intersection.polygon.material {
-            PresetMaterial::FlatMaterial(m) => { <FlatMaterial as Material<E, SimpleBVHCamera<E>, Polygon<E, Global>>>::calc_color(&m,intersection, engine, self, camera_node, global_polygons) }
-            PresetMaterial::LambertMaterial(m) => {(&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
-            PresetMaterial::LambertWithShadowMaterial(m) => {(&&m).calc_color(intersection, engine, self, camera_node, global_polygons) }
+            PresetPolygonMaterial::FlatMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetPolygonMaterial::LambertMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetPolygonMaterial::LambertWithShadowMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, Polygon<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
         }
     }
 }
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial>> Camera<E> for SimpleBVHCamera<E>{
+impl<E: AsciaEnvironment<PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> MaterialDispatcher<E, CParticle<E, Global>> for SimpleBVHCamera<E>{
+    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) ->  (ColorRGBf32, u32) {
+        match intersection.particle.material {
+            PresetCParticleMaterial::FlatMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetCParticleMaterial::LambertMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+            PresetCParticleMaterial::LambertWithShadowMaterial(m) => {
+                <_ as Material<E, SimpleBVHCamera<E>, CParticle<E, Global>>>::calc_color(&(&m), intersection, engine, self, camera_node, global_polygons)
+            }
+        }
+    }
+}
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Camera<E> for SimpleBVHCamera<E>{
     fn render(&self, node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>> {
         let height = engine.viewport.borrow().height();
         let width = engine.viewport.borrow().width();
@@ -594,14 +663,13 @@ impl<E: AsciaEnvironment<Materials = PresetMaterial>> Camera<E> for SimpleBVHCam
                     let mut depth = f32::MAX;
                     if let Some(intersection) = &polygon_intersections[x][y]{
                         output[y][x].c = '#';
-                        output[y][x].color = self.calc_color(intersection, engine, node, &polygons_bvh_tree.data).0.into();
+                        output[y][x].color = <_ as MaterialDispatcher<E, Polygon<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
                         depth = intersection.depth;
                     }
                     if let Some(intersection) = &c_particle_intersections[x][y]{
-                        if intersection.depth < depth{
-                            output[y][x].c = intersection.particle.c;
-                            output[y][x].color = intersection.particle.color.into();
-                        }
+                        output[y][x].c = intersection.particle.c;
+                        output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
+                        depth = intersection.depth;
                     }
                 }
             }
@@ -661,7 +729,7 @@ impl<E: AsciaEnvironment<Materials = PresetMaterial>> Camera<E> for SimpleBVHCam
                             }
                             seg <<= 1;
                             if let Some(intersection) = &polygon_intersections[x * 3 + j][y * 3 + i] {
-                                material_results[k] = self.calc_color(intersection, engine, node, &polygons_bvh_tree.data);
+                                material_results[k] = <_ as MaterialDispatcher<E, Polygon<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data);
                                 if max_priority < material_results[k].1{
                                     max_priority = material_results[k].1;
                                     seg = 0;
@@ -695,12 +763,12 @@ impl<E: AsciaEnvironment<Materials = PresetMaterial>> Camera<E> for SimpleBVHCam
                         if let Some(first) = &polygon_intersections[x * 3][y * 3]{
                             if intersection.depth < first.depth{
                                 output[y][x].c = intersection.particle.c;
-                                output[y][x].color = intersection.particle.color.into();
+                                output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
                             }
                         }
                         else{
                             output[y][x].c = intersection.particle.c;
-                            output[y][x].color = intersection.particle.color.into();
+                            output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
                         }
                     }
                 }

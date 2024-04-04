@@ -5,5 +5,7 @@ pub mod lights;
 pub mod camera;
 pub mod charmapper;
 pub mod color;
-pub mod camera_gpu;
+pub mod util;
 
+#[cfg(feature = "wgpu")]
+pub mod camera_wgpu;

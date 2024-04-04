@@ -6,22 +6,23 @@ use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::Deref;
 use std::rc::{Rc};
+use std::thread;
 use std::time::{Duration, Instant};
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
-use crate::ascia::camera_gpu::GPUWrapper;
 use crate::ascia::color::{Color8bit, ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 use crate::ascia::math::{AABB3D, Matrix33, Quaternion, Vec2, Vec3};
 
+#[cfg(feature = "wgpu")]
+use crate::ascia::camera_wgpu::GPUWrapper;
+
 pub trait AsciaEnvironment where Self: 'static{
-    type Materials: MaterialCollection + Clone;
+    type PolygonMaterials: MaterialCollection<Polygon<Self, Global>> + Clone;
+    type CParticleMaterials: MaterialCollection<CParticle<Self, Global>> + Clone;
     type Cameras: CameraDispatcher<Self>;
     type Lights: LightDispatcher<Self>;
     type ObjectNodeAttributes: ObjectNodeAttributeDispatcher<Self>;
 }
-
-pub trait Dispatcher<T> {}
-
 
 pub trait ObjectNodeAttribute<E: AsciaEnvironment + ?Sized>{
     fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self: Sized{
@@ -30,15 +31,13 @@ pub trait ObjectNodeAttribute<E: AsciaEnvironment + ?Sized>{
 }
 
 pub trait Material<E: AsciaEnvironment + ?Sized, CA: Camera<E> + ?Sized, RT: RaytracingTarget<0>>: Clone{
-    fn calc_color<'a>(&self, intersection: &RT::Intersection<'a>, engine: &AsciaEngine<E>, camera:&CA, camera_node: &ObjectNode<E,Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
-    fn make_material_dispatcher<'a>(self) -> E::Materials where (E::Materials): From<Self>{
-        E::Materials::from(self)
-    }
+    type Output;
+    fn calc_color<'a>(&self, intersection: &RT::Intersection<'a>, engine: &AsciaEngine<E>, camera:&CA, camera_node: &ObjectNode<E,Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output;
 }
 
-pub trait MaterialCollection: Default{}
-pub trait MaterialDispatcher<'a, E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>: Camera<E>{
-    fn calc_color(&self, intersection: &RT::Intersection<'a>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
+pub trait MaterialCollection<RT: RaytracingTarget<0>>: Default{}
+pub trait MaterialDispatcher<E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>: Camera<E>{
+    fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
 }
 
 pub trait Camera<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
@@ -77,34 +76,52 @@ pub trait ObjectNodeAttributeDispatcher<E: AsciaEnvironment + ?Sized>{
 pub struct PresetAsciaEnvironment{}
 
 #[derive(Copy, Clone)]
-pub enum PresetMaterial{
+pub enum PresetPolygonMaterial {
     FlatMaterial(FlatMaterial),
     LambertMaterial(LambertMaterial),
     LambertWithShadowMaterial(LambertWithShadowMaterial),
 }
 
-impl Default for PresetMaterial{
+impl Default for PresetPolygonMaterial {
     fn default() -> Self {
-        PresetMaterial::FlatMaterial(FlatMaterial::default())
+        PresetPolygonMaterial::FlatMaterial(FlatMaterial::default())
     }
 }
 
-impl MaterialCollection for PresetMaterial{}
+impl<E: AsciaEnvironment> MaterialCollection<Polygon<E, Global>> for PresetPolygonMaterial {}
 
-pub enum PresetCamera<E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>>{
+#[cfg(not(feature = "wgpu"))]
+pub enum PresetCamera<E: AsciaEnvironment<PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>>{
+    SimpleCamera(SimpleCamera<E>),
+    SimpleBVHCamera(SimpleBVHCamera<E>),
+}
+
+#[cfg(feature = "wgpu")]
+pub enum PresetCamera<E: AsciaEnvironment<PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>>{
     SimpleCamera(SimpleCamera<E>),
     SimpleBVHCamera(SimpleBVHCamera<E>),
     SimpleCameraGPU(GPUWrapper<E, SimpleCamera<E>>),
     SimpleBVHCameraGPU(GPUWrapper<E, SimpleBVHCamera<E>>)
 }
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial, Lights = PresetLight>> Default for PresetCamera<E> {
+impl<E: AsciaEnvironment<PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Default for PresetCamera<E> {
     fn default() -> Self {
         PresetCamera::SimpleCamera(SimpleCamera::default())
     }
 }
 
-impl<E: AsciaEnvironment<Cameras = PresetCamera<E>, Materials = PresetMaterial, Lights = PresetLight>> CameraDispatcher<E> for PresetCamera<E>{
+#[cfg(not(feature = "wgpu"))]
+impl<E: AsciaEnvironment<Cameras = PresetCamera<E>, PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> CameraDispatcher<E> for PresetCamera<E>{
+    fn render(&self, camera_node: &ObjectNode<E,Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>> {
+        match self {
+            PresetCamera::SimpleCamera(c) => {c.render(camera_node, engine)}
+            PresetCamera::SimpleBVHCamera(c) => {c.render(camera_node, engine)}
+        }
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl<E: AsciaEnvironment<Cameras = PresetCamera<E>, PolygonMaterials = PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> CameraDispatcher<E> for PresetCamera<E>{
     fn render(&self, camera_node: &ObjectNode<E,Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>> {
         match self {
             PresetCamera::SimpleCamera(c) => {c.render(camera_node, engine)}
@@ -138,7 +155,7 @@ pub enum PresetObjectNodeAttributeDispatcher<E: AsciaEnvironment>{
     Light(E::Lights)
 }
 
-impl<E: AsciaEnvironment<Materials = PresetMaterial, Cameras = PresetCamera<E>, Lights = PresetLight>> From<PresetCamera<E>> for PresetObjectNodeAttributeDispatcher<E>{
+impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Cameras = PresetCamera<E>, Lights = PresetLight>> From<PresetCamera<E>> for PresetObjectNodeAttributeDispatcher<E>{
     fn from(value: PresetCamera<E>) -> Self {
         PresetObjectNodeAttributeDispatcher::Camera(value)
     }
@@ -174,8 +191,24 @@ impl<E:AsciaEnvironment> ObjectNodeAttributeDispatcher<E> for PresetObjectNodeAt
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum PresetCParticleMaterial {
+    FlatMaterial(FlatMaterial),
+    LambertMaterial(LambertMaterial),
+    LambertWithShadowMaterial(LambertWithShadowMaterial),
+}
+
+impl Default for PresetCParticleMaterial {
+    fn default() -> Self {
+        PresetCParticleMaterial::FlatMaterial(FlatMaterial::default())
+    }
+}
+
+impl<E: AsciaEnvironment> MaterialCollection<CParticle<E, Global>> for PresetCParticleMaterial {}
+
 impl AsciaEnvironment for PresetAsciaEnvironment{
-    type Materials = PresetMaterial;
+    type PolygonMaterials = PresetPolygonMaterial;
+    type CParticleMaterials = PresetCParticleMaterial;
     type Cameras = PresetCamera<Self>;
     type Lights = PresetLight;
     type ObjectNodeAttributes = PresetObjectNodeAttributeDispatcher<Self>;
@@ -366,14 +399,14 @@ pub trait RaytracingTarget<const RECURSION_COUNT: usize>{
     fn project_by<'a, F: Fn(&Self::Intersection<'a>) -> bool>(&'a self, ray: &Ray, exclude_cond: &F) -> Option<Self::Intersection<'a>>;
 }
 
+
+
 #[derive(Debug, Copy)]
 pub struct Polygon<E: AsciaEnvironment + ?Sized + 'static, CO: CoordinateType>{
     pub poses:Matrix33,
-    pub material: E::Materials,
+    pub material: E::PolygonMaterials,
     pub _ph: PhantomData<CO>
 }
-
-
 
 impl<E:AsciaEnvironment + ?Sized + 'static, CO:CoordinateType> RaytracingTarget<0> for Polygon<E, CO>{
     type Intersection<'a> = PolygonRayIntersection<'a, E, CO>;
@@ -556,7 +589,7 @@ impl<E:AsciaEnvironment,CO:CoordinateType> Polygon<E, CO> {
                 v2:p2.clone(),
                 v3:p3.clone()
             },
-            material: E::Materials::default(),
+            material: E::PolygonMaterials::default(),
             _ph: Default::default()
         }
     }
@@ -581,11 +614,10 @@ pub struct ObjectNode<E: AsciaEnvironment + ?Sized + 'static,CO:CoordinateType>{
 pub struct CParticle<E: AsciaEnvironment + ?Sized + 'static, C: CoordinateType> {
     pub position:Vec3,
     pub velocity:Vec3,
-    pub color:ColorRGBf32,
     pub c:char,
     pub threshold:f32,
     pub mode:CParticleMode,
-    pub material: E::Materials,
+    pub material: E::CParticleMaterials,
     pub _ph: PhantomData<C>
 }
 
@@ -594,11 +626,10 @@ impl<E: AsciaEnvironment, C: CoordinateType> Clone for CParticle<E, C>{
         return CParticle{
             position: self.position,
             velocity: self.velocity,
-            color: self.color,
             c: self.c,
             threshold: self.threshold,
             mode: self.mode,
-            material: E::Materials::default(),
+            material: self.material.clone(),
             _ph: Default::default(),
         }
     }
@@ -731,11 +762,10 @@ impl<E:AsciaEnvironment> ObjectNode<E, Local>{
                 child.c_particles.push(CParticle {
                     position: child.position + child.direction.rotate(&p.position),
                     velocity: p.velocity,
-                    color: p.color,
                     c: p.c,
                     threshold: p.threshold,
                     mode: p.mode,
-                    material: E::Materials::default(),
+                    material: p.material.clone(),
                     _ph: Default::default(),
                 });
             }
@@ -910,8 +940,8 @@ mod tests{
 
 #[derive(Copy, Clone)]
 pub struct RenderChar{
-    pub(crate) c:char,
-    pub(crate) color: ColorRGBu8
+    pub c:char,
+    pub color: ColorRGBu8
 }
 
 impl Default for RenderChar{
@@ -991,31 +1021,32 @@ pub struct AsciaEngine<E: AsciaEnvironment + ?Sized>{
     pub genesis_local: ObjectNode<E, Local>,
     pub genesis_global: ObjectNode<E, Global>,
     pub viewport: RefCell<Box<dyn Viewport>>,
-    pub wgpu_daq: Option<(wgpu::Device,wgpu::Queue)>,
     engine_time:Duration,
     engine_started:Instant
 }
 
 impl<E: AsciaEnvironment> AsciaEngine<E>{
     pub fn new(width:usize,height:usize) -> Self{
+        /*
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let mut limits = wgpu::Limits::default();
         let mut wgpu_daq:Option<(wgpu::Device,wgpu::Queue)> = None;
-        limits.max_bind_groups = 8;
+        limits.max_bind_groups = 8; */
         /*
         limits.max_buffer_size = 268435456u64 * 16u64;
         limits.max_storage_buffer_binding_size = u32::MAX;
          */
         
+        /*
         if let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())){
             if let Ok(daq) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor{
                 label: None,
-                features: Default::default(),
-                limits: limits,
+                required_features: Default::default(),
+                required_limits: limits,
             }, None)){
                 wgpu_daq = Some(daq);
             }
-        }
+        } */
  
         return AsciaEngine{
             genesis_local: ObjectNode::new("genesis"),
@@ -1029,18 +1060,17 @@ impl<E: AsciaEnvironment> AsciaEngine<E>{
                 children: Default::default(),
             },
             viewport: RefCell::new(Box::new(ViewportStdout::new(width, height))),
-            wgpu_daq: wgpu_daq,
             engine_time:Duration::ZERO,
             engine_started:Instant::now()
         }
     }
 
-    pub fn render(&self, camera_node: &ObjectNode<E, Global>) -> Result<(), String>{
+    pub fn render(&self, camera_node: &ObjectNode<E, Global>) -> Result<Vec<Vec<RenderChar>>, String>{
         if let Some(a) = &*camera_node.attribute.borrow(){
             if let Some(camera) = a.camera(){
                 let result = camera.render(camera_node, self);
                 self.viewport.borrow_mut().display(&result);
-                return Ok(());
+                return Ok(result);
             }
         }
         return Err("given node does not contain camera attribute".to_string());
@@ -1050,8 +1080,16 @@ impl<E: AsciaEnvironment> AsciaEngine<E>{
         return self.engine_time.clone();
     }
 
+    pub fn engine_started_time(&self) -> Instant{
+        return self.engine_started.clone();
+    }
+    
     pub fn sync_engine_time(&mut self){
         self.engine_time = self.engine_started.elapsed();
+    }
+
+    pub fn set_engine_time(&mut self, dur: &Duration){
+        self.engine_time = dur.clone();
     }
     
     pub fn update_global_nodes(&mut self){
