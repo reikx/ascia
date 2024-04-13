@@ -1,18 +1,12 @@
 extern crate ascia;
 
-use std::cell::RefCell;
 use std::f32::consts::PI;
-use std::fs::File;
-use std::{env, io, thread};
-use std::io::{Read, stdin};
+use std::{env, thread};
 use std::ops::Add;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::rc::Rc;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use ascia::ascia::camera::{SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{FlatMaterial, LambertMaterial, LambertWithShadowMaterial, Local, Material, ObjectNode, PresetCamera, PresetLight, PresetPolygonMaterial, ObjectNodeAttribute, PresetObjectNodeAttributeDispatcher, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, AsciaEngine};
+use ascia::ascia::core::{FlatMaterial, LambertMaterial, LambertWithShadowMaterial, ObjectNode, PresetLight, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, AsciaEngine};
 use ascia::ascia::lights::{PointLight};
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
@@ -40,8 +34,8 @@ fn main() {
     
     engine.genesis_local.add_child(cam_objn);
     
-    let mut null_container = ObjectNode::new("null container");
-    null_container.position = Vec3{
+    let mut container = ObjectNode::new("container");
+    container.position = Vec3{
         x:0.0,
         y:0.0,
         z:25.0
@@ -61,7 +55,7 @@ fn main() {
         z:0.0
     };
     
-    null_container.add_child(cube_1);
+    container.add_child(cube_1);
 
     let mut cube_2 = ObjectNode::from("cube 2", PrimitiveGenerator::cube(6.0, PresetPolygonMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
@@ -76,7 +70,7 @@ fn main() {
         y:0.0,
         z:0.0
     };
-    null_container.add_child(cube_2);
+    container.add_child(cube_2);
     
     let mut cube_3 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0, PresetPolygonMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
@@ -92,7 +86,7 @@ fn main() {
         y:0.0,
         z:14.0
     };
-    null_container.add_child(cube_3);
+    container.add_child(cube_3);
 
     let mut cube_4 = ObjectNode::from("cube 3", PrimitiveGenerator::cube(6.0, PresetPolygonMaterial::LambertMaterial(LambertMaterial{
         color: ColorRGBf32{
@@ -108,9 +102,9 @@ fn main() {
         y:0.0,
         z:20.0
     };
-    null_container.add_child(cube_4);
+    container.add_child(cube_4);
     
-    let mut red_square = ObjectNode::from("red square", PrimitiveGenerator::square(20.0, PresetPolygonMaterial::LambertWithShadowMaterial(
+    let red_square = ObjectNode::from("red square", PrimitiveGenerator::square(20.0, PresetPolygonMaterial::LambertWithShadowMaterial(
         LambertWithShadowMaterial{
             color: ColorRGBf32{
                 r: 1.0,
@@ -121,7 +115,7 @@ fn main() {
         }
     )));
     
-    null_container.add_child(red_square);
+    container.add_child(red_square);
 
     let mut green_square = ObjectNode::from("green square", PrimitiveGenerator::square(20.0, PresetPolygonMaterial::FlatMaterial(
         FlatMaterial{
@@ -140,9 +134,9 @@ fn main() {
         y:1.0,
         z:0.0
     },-PI * 0.5, 1.0);
-    null_container.add_child(green_square);
+    container.add_child(green_square);
 
-    let mut blue_square = ObjectNode::from("blue square", PrimitiveGenerator::square(20.0, PresetPolygonMaterial::LambertWithShadowMaterial(
+    let blue_square = ObjectNode::from("blue square", PrimitiveGenerator::square(20.0, PresetPolygonMaterial::LambertWithShadowMaterial(
         LambertWithShadowMaterial{
             color: ColorRGBf32{
                 r: 0.0,
@@ -152,7 +146,7 @@ fn main() {
             priority: 0,
         }
     )));
-    null_container.add_child(blue_square);
+    container.add_child(blue_square);
     
     for i in 0..64{
         let mut tiny_cube = ObjectNode::from(&format!("tiny cube {}", i), PrimitiveGenerator::cube(10.0, PresetPolygonMaterial::LambertWithShadowMaterial(
@@ -178,7 +172,7 @@ fn main() {
             y:i as f32 * 10.0,
             z:0.0
         });
-        null_container.add_child(tiny_cube);
+        container.add_child(tiny_cube);
     }
     
     let pointlight = PresetLight::PointLight(PointLight{
@@ -197,7 +191,7 @@ fn main() {
     light.position.z = -30.0;
     engine.genesis_local.add_child(light);
     
-    engine.genesis_local.add_child(null_container);
+    engine.genesis_local.add_child(container);
 
     let mut termios_controller = TermiosController::generate(|c, e|{
         if let Some(camera) = e.genesis_local.child_mut("camera"){
@@ -228,19 +222,19 @@ fn main() {
         let d = engine.engine_time();
 
         {
-            let mut null_container = engine.genesis_local.child_mut("null container").unwrap();
-            null_container.direction = Quaternion::new(&Vec3{
+            let container = engine.genesis_local.child_mut("container").unwrap();
+            container.direction = Quaternion::new(&Vec3{
                 x:1.0,
                 y:0.0,
                 z:0.0
-            },1.0, 1.0) * Quaternion::new(&Vec3{
+            }, 1.0, 1.0) * Quaternion::new(&Vec3{
                 x:0.0,
                 y:1.0,
                 z:0.0
             },(d.as_millis() as f32) / 5000.0 * 2.0 * PI, 1.0);
         }
         {
-            let mut cube_1 = engine.genesis_local.child_mut("null container").unwrap().child_mut("cube 1").unwrap();
+            let cube_1 = engine.genesis_local.child_mut("container").unwrap().child_mut("cube 1").unwrap();
             cube_1.position.y = 8.0 * f32::sin((d.as_millis() as f32) / 2000.0 * 2.0 * PI);
             cube_1.direction = Quaternion::new(&Vec3{
                 x:1.0,
@@ -249,7 +243,7 @@ fn main() {
             }.normalize(),(d.as_millis() as f32) / 2000.0 * 2.0 * PI, 1.0);
         }
         {
-            let mut cube_2 = engine.genesis_local.child_mut("null container").unwrap().child_mut("cube 1").unwrap();
+            let cube_2 = engine.genesis_local.child_mut("container").unwrap().child_mut("cube 1").unwrap();
             cube_2.position.y = 3.0 * f32::cos((d.as_millis() as f32) / 3000.0 * 2.0 * PI);
             cube_2.direction = Quaternion::new(&Vec3{
                 x:1.0,
@@ -258,7 +252,7 @@ fn main() {
             }.normalize(),(d.as_millis() as f32) / 3000.0 * 2.0 * PI, 1.0);
         }
         {
-            let mut blue_square = engine.genesis_local.child_mut("null container").unwrap().child_mut("blue square").unwrap();
+            let blue_square = engine.genesis_local.child_mut("container").unwrap().child_mut("blue square").unwrap();
             blue_square.direction = Quaternion::new(&Vec3{
                 x: 0.0,
                 y: 1.0,
@@ -266,15 +260,15 @@ fn main() {
             },(d.as_millis() as f32) / 2500.0 * 2.0 * PI, 1.0);
         }
         
-        termios_controller.input(&mut engine);
+        termios_controller.input(&mut engine).expect("something went wrong with processing input from keyboard");
         engine.update_global_nodes();
-        engine.render(engine.genesis_global.child("camera").unwrap());
+        engine.render(engine.genesis_global.child("camera").unwrap()).expect("failed rendering");
 
         if (last_time.elapsed().as_millis() as u64) < (1000 / fps_upper_limit){
             thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
 
-        let mut dur = last_time.elapsed();
+        let dur = last_time.elapsed();
 
         println!("dur:{}      ",dur.as_millis());
         println!("fps:{}      ",1000 / dur.as_millis());

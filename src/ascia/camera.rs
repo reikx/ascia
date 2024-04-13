@@ -3,24 +3,22 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::marker::PhantomData;
-use std::rc::Rc;
 use crate::ascia::charmapper;
-use crate::ascia::core::{AsciaEngine, Camera, CParticle, CParticleMode, CParticleRayIntersection, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, Light, Material, ObjectNode, Polygon, PolygonRayIntersection, Ray, RaytracingTarget, RayIntersection, RenderChar, PresetPolygonMaterial, PresetCamera, ObjectNodeAttribute, AsciaEnvironment, ObjectNodeAttributeDispatcher, LightDispatcher, MaterialDispatcher, PresetObjectNodeAttributeDispatcher, CameraDispatcher, PresetLight, PresetCParticleMaterial};
+use crate::ascia::core::{AsciaEngine, Camera, CParticle, CParticleMode, CParticleRayIntersection, FlatMaterial, Global, LambertMaterial, LambertWithShadowMaterial, Material, ObjectNode, Polygon, PolygonRayIntersection, Ray, RaytracingTarget, RayIntersection, RenderChar, PresetPolygonMaterial, PresetCamera, ObjectNodeAttribute, AsciaEnvironment, ObjectNodeAttributeDispatcher, LightDispatcher, MaterialDispatcher, PresetObjectNodeAttributeDispatcher, CameraDispatcher, PresetLight, PresetCParticleMaterial};
 use crate::ascia::math::{AABB3D, Vec3};
 use crate::ascia::color::{ColorRGBf32, ColorRGBu8};
-use crate::ascia::lights::PointLight;
 
 impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &FlatMaterial{
     type Output = (ColorRGBf32, u32);
 
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, _intersection: &PolygonRayIntersection<E, Global>, _engine: &AsciaEngine<E>, _camera: &CA, _camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         (self.color, self.priority)
     }
 }
 
 impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for &LambertMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, _camera: &CA, camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
             if let Some(a) = &*node.attribute.borrow(){
@@ -43,7 +41,7 @@ impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, Polygon<E, Global>> for 
 
 impl<'a, E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Material<E, SimpleCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, _camera: &SimpleCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32::default();
         for node in engine.genesis_global.iter(){
             if let Some(a) = &*node.attribute.borrow(){
@@ -81,7 +79,7 @@ impl<'a, E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMa
 
 impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMaterials=PresetCParticleMaterial, Lights = PresetLight>> Material<E, SimpleBVHCamera<E>, Polygon<E, Global>> for &LambertWithShadowMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleBVHCamera<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &SimpleBVHCamera<E>, camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         let mut result = ColorRGBf32{
             r:0.0,
             g:0.0,
@@ -92,7 +90,7 @@ impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateri
                 if let Some(light) = a.light() {
                     let co = (node.position - intersection.position).normalize() * intersection.normal;
                     let color = light.ray(node, &intersection.position);
-                    let mut is_prevented = Ray{
+                    let is_prevented = Ray{
                         position: intersection.position,
                         direction: node.position - intersection.position
                     }.project(&*camera.polygons_bvh_tree.borrow(), &(|i: &PolygonRayIntersection<E, Global>| -> bool { std::ptr::eq(i.polygon, intersection.polygon)})).is_some();
@@ -116,28 +114,28 @@ impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateri
 // auto deref specialization
 impl<'a, E: AsciaEnvironment, CA: Camera<E>> Material<E, CA, Polygon<E, Global>> for LambertWithShadowMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &PolygonRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output {
+    fn calc_color(&self, _intersection: &PolygonRayIntersection<E, Global>, _engine: &AsciaEngine<E>, _camera: &CA, _camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output {
         unimplemented!()
     }
 }
 
 impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &FlatMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, _intersection: &CParticleRayIntersection<E, Global>, _engine: &AsciaEngine<E>, _camera: &CA, _camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         return (self.color, self.priority);
     }
 }
 
 impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &LambertMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, _intersection: &CParticleRayIntersection<E, Global>, _engine: &AsciaEngine<E>, _camera: &CA, _camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         todo!()
     }
 }
 
 impl<E: AsciaEnvironment, CA:Camera<E>> Material<E, CA, CParticle<E, Global>> for &LambertWithShadowMaterial{
     type Output = (ColorRGBf32, u32);
-    fn calc_color(&self, intersection: &CParticleRayIntersection<E, Global>, engine: &AsciaEngine<E>, camera: &CA, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
+    fn calc_color(&self, _intersection: &CParticleRayIntersection<E, Global>, _engine: &AsciaEngine<E>, _camera: &CA, _camera_node: &ObjectNode<E, Global>, _global_polygons: &Vec<Polygon<E, Global>>) -> Self::Output{
         todo!()
     }
 }
@@ -241,7 +239,7 @@ impl<E:AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateria
                             y:f32::tan(self.angle_of_view.1 * 0.5) * (1.0 - 2.0 * y as f32 / height as f32),
                             z:f32::tan(self.angle_of_view.0 * 0.5) * (1.0 - 2.0 * x as f32 / width as f32),
                         })
-                    }.project(&global_polygons, &|i|{false});
+                    }.project(&global_polygons, &|_|{false});
                     c_particle_intersections[x][y] = Ray{
                         position: node.position,
                         direction: node.direction.rotate(&Vec3{
@@ -267,9 +265,10 @@ impl<E:AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateria
                         depth = intersection.depth;
                     }
                     if let Some(intersection) = &c_particle_intersections[x][y]{
-                        output[y][x].c = intersection.particle.c;
-                        output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
-                        depth = intersection.depth;
+                        if intersection.depth < depth{
+                            output[y][x].c = intersection.particle.c;
+                            output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &global_polygons).0.into();
+                        }
                     }
                 }
             }
@@ -291,7 +290,7 @@ impl<E:AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateria
                                 }),
                             };
                             let v = &global_polygons;
-                            polygon_intersections[x * 3 + j][y * 3 + i] =  ray.project(v, &|i|{false});
+                            polygon_intersections[x * 3 + j][y * 3 + i] =  ray.project(v, &|_|{false});
                         }
                     }
                     c_particle_intersections[x][y] = Ray{
@@ -493,7 +492,7 @@ impl<T> RaytracingTarget<1> for NaiveBVH<T> where T : RaytracingTarget<0> {
         while !stack.is_empty() {
             let i = *stack.back().unwrap();
             if let Some(aabb) = &self.buf[i]{
-                if let Some(r) = ray.project(aabb, &|i|{false}){
+                if let Some(_) = ray.project(aabb, &|_|{false}){
                     if self.buf.len() / 2 <= i{
                         if let Some(r1) = (&self.data[i - (self.buf.len() / 2)]).project_by(&ray, f){
                             if let Some(r2) = &nearest{
@@ -641,7 +640,7 @@ impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateri
                             y:f32::tan(self.angle_of_view.1 * 0.5) * (1.0 - 2.0 * y as f32 / height as f32),
                             z:f32::tan(self.angle_of_view.0 * 0.5) * (1.0 - 2.0 * x as f32 / width as f32),
                         })
-                    }.project(&*polygons_bvh_tree, &|i|{false});
+                    }.project(&*polygons_bvh_tree, &|_|{false});
                     c_particle_intersections[x][y] = Ray{
                         position: node.position,
                         direction: node.direction.rotate(&Vec3{
@@ -667,9 +666,10 @@ impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateri
                         depth = intersection.depth;
                     }
                     if let Some(intersection) = &c_particle_intersections[x][y]{
-                        output[y][x].c = intersection.particle.c;
-                        output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
-                        depth = intersection.depth;
+                        if intersection.depth < depth{
+                            output[y][x].c = intersection.particle.c;
+                            output[y][x].color = <_ as MaterialDispatcher<E, CParticle<E, Global>>>::calc_color(self, intersection, engine, node, &polygons_bvh_tree.data).0.into();
+                        }
                     }
                 }
             }
@@ -689,7 +689,7 @@ impl<E: AsciaEnvironment<PolygonMaterials=PresetPolygonMaterial, CParticleMateri
                                     y:f32::tan(self.angle_of_view.1 * 0.5) * (1.0 - 2.0 * (y * 3 + i) as f32 / (height * 3) as f32),
                                     z:f32::tan(self.angle_of_view.0 * 0.5) * (1.0 - 2.0 * (x * 3 + j) as f32 / (width * 3) as f32),
                                 }),
-                            }.project(&*polygons_bvh_tree, &|i|{false});
+                            }.project(&*polygons_bvh_tree, &|_|{false});
                         }
                     }
                     c_particle_intersections[x][y] = Ray{

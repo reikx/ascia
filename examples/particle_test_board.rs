@@ -1,22 +1,14 @@
 extern crate ascia;
 
-use std::cell::RefCell;
 use std::f32::consts::PI;
-use std::fs::{File, read};
-use std::{env, io, thread};
-use std::io::{BufRead, BufReader, Read, stdin};
-use std::ops::Add;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::rc::Rc;
+use std::{env, thread};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use ascia::ascia::camera::{NaiveBVH, SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{CParticle, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetCamera, PresetLight, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine, PresetCParticleMaterial, FlatMaterial};
+use ascia::ascia::core::{CParticle, ObjectNode, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetObjectNodeAttributeDispatcher, AsciaEngine, PresetCParticleMaterial, FlatMaterial};
 use ascia::ascia::core::CParticleMode::ARG;
 use ascia::ascia::lights::{PointLight};
-use ascia::ascia::math::{Matrix33, Quaternion, Vec3};
-use ascia::ascia::primitives::PrimitiveGenerator;
+use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::util::{available_preset_cameras, move_camera, preset_camera_info, rotate_camera, TermiosController};
 
 fn main() {
@@ -29,7 +21,7 @@ fn main() {
 
     let mut engine = AsciaEngine::<PresetAsciaEnvironment>::new(width, height);
 
-    let mut cameras = available_preset_cameras();
+    let cameras = available_preset_cameras();
     let mut now_camera_index = 0usize;
 
     let mut cam_objn = ObjectNode::new("camera");
@@ -42,8 +34,8 @@ fn main() {
 
     engine.genesis_local.add_child(cam_objn);
 
-    let mut null_container = ObjectNode::new("null container");
-    null_container.position = Vec3{
+    let mut container = ObjectNode::new("container");
+    container.position = Vec3{
         x:0.0,
         y:0.0,
         z:100.0
@@ -76,8 +68,8 @@ fn main() {
         });
     }
 
-    null_container.add_child(en1);
-    engine.genesis_local.add_child(null_container);
+    container.add_child(en1);
+    engine.genesis_local.add_child(container);
 
     let light = PointLight{
         color: ColorRGBu8 {
@@ -124,7 +116,7 @@ fn main() {
 
         let d = 0.5 + f32::sin(engine_time.as_secs_f32() * 0.3 * PI) * 0.5;
         for i in 0..2048 {
-            engine.genesis_local.child_mut("null container").unwrap().child_mut("en1").unwrap().c_particles[i].position = d * Vec3 {
+            engine.genesis_local.child_mut("container").unwrap().child_mut("en1").unwrap().c_particles[i].position = d * Vec3 {
                 x: 1.0 * (i % 80) as f32 - 40.0,
                 y: 1.0 * (i / 80) as f32 - 40.0,
                 z: 100.0,
@@ -135,15 +127,15 @@ fn main() {
             };
         }
 
-        termios_controller.input(&mut engine);
+        termios_controller.input(&mut engine).expect("something went wrong with processing input from keyboard");
         engine.update_global_nodes();
-        engine.render(engine.genesis_global.child("camera").unwrap());
+        engine.render(engine.genesis_global.child("camera").unwrap()).expect("failed rendering");
 
         if (last_time.elapsed().as_millis() as u64) < (1000 / fps_upper_limit){
             thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
 
-        let mut dur = last_time.elapsed();
+        let dur = last_time.elapsed();
 
         println!("dur:{}      ", dur.as_millis());
         println!("fps:{}      ", 1000 / dur.as_millis());

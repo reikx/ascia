@@ -1,31 +1,33 @@
-use std::cell::{Ref, RefCell};
+use std::cell::{RefCell};
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::fs::File;
+use std::intrinsics::transmute;
 use std::io::{Read, stdin, Write};
+use std::rc::Rc;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
-use std::rc::Rc;
-use std::thread;
-use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
-use crate::ascia::core::{AsciaEngine, AsciaEnvironment, Local, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetCamera, PresetObjectNodeAttributeDispatcher, RenderChar};
+use crate::ascia::core::{AsciaEngine, AsciaEnvironment, CoordinateType, CParticle, Local, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetCamera, PresetObjectNodeAttributeDispatcher, RenderChar};
 use crate::ascia::math::{Quaternion, Vec3};
+use crate::ascia::color::ColorANSI256;
 
 #[cfg(feature = "wgpu")]
 use crate::ascia::camera_wgpu::GPUWrapper;
-use crate::ascia::color::Color8bit;
+
+#[cfg(feature = "export")]
+use serde::{Deserialize, Serialize};
+
 
 pub fn available_preset_cameras() -> Vec<Rc<RefCell<Option<PresetObjectNodeAttributeDispatcher<PresetAsciaEnvironment>>>>>{
     let aov = (PI / 3.0, PI / 4.0);
 
-    let mut cameras = vec![
-        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
-        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared(),
-        SimpleCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
-        SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared(),
-    ];
+    let mut cameras = vec![];
+    cameras.push(SimpleCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared());
+    cameras.push(SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 1).make_attribute_enum().make_shared());
+    cameras.push(SimpleCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared());
+    cameras.push(SimpleBVHCamera::<PresetAsciaEnvironment>::new(aov, 3).make_attribute_enum().make_shared());
 
     #[cfg(feature = "wgpu")]
     {
@@ -45,13 +47,13 @@ pub fn available_preset_cameras() -> Vec<Rc<RefCell<Option<PresetObjectNodeAttri
     return cameras;
 }
 
-pub fn move_camera<E: AsciaEnvironment>(camera_velocity:f32, mut cam_objn: &mut ObjectNode<E, Local>, relative_direction: &Vec3){
+pub fn move_camera<E: AsciaEnvironment>(camera_velocity:f32, cam_objn: &mut ObjectNode<E, Local>, relative_direction: &Vec3){
     let p = cam_objn.position.clone();
     let d = cam_objn.direction.clone();
     cam_objn.position = p + d.rotate(&(relative_direction.normalize() * camera_velocity));
 }
 
-pub fn rotate_camera<E: AsciaEnvironment>(camera_rotation_speed: f32, mut cam_objn: &mut ObjectNode<E, Local>, relative_axis: &Vec3){
+pub fn rotate_camera<E: AsciaEnvironment>(camera_rotation_speed: f32, cam_objn: &mut ObjectNode<E, Local>, relative_axis: &Vec3){
     let d = cam_objn.direction.clone();
     cam_objn.direction = d * Quaternion::new(relative_axis, camera_rotation_speed, 1.0);
 }
@@ -75,6 +77,40 @@ pub fn preset_camera_info(attr: &Rc<RefCell<Option<PresetObjectNodeAttributeDisp
     return "unknown".to_string();
 }
 
+fn parse_vec3_to_morton_code(v: &Vec3, depth: u32) -> u64{
+    unsafe {
+        let bx: u32 = transmute(v.x);
+        let by: u32 = transmute(v.y);
+        let bz: u32 = transmute(v.z);
+        let mut code:u64 = 0;
+        for i in 0..(depth * 3) {
+            let j = 31 - i / 3;
+            code |= (match i % 3 {
+                0 => {
+                    (bx >> j) & 1
+                },
+                1 => {
+                    (by >> j) & 1
+                },
+                2 => {
+                    (bz >> j) & 1
+                },
+                _ => {
+                    unreachable!();
+                }
+            } as u64) << (63 - i);
+        }
+        return code;
+    }
+}
+pub fn sort_c_particles_by_morton_code<E: AsciaEnvironment, CO: CoordinateType>(particles: &mut Vec<CParticle<E, CO>>) {
+    particles.sort_by_key(|cp: &CParticle<E, CO>| { parse_vec3_to_morton_code(&cp.position, 16) });
+}
+
+pub fn sort_polygons_by_morton_code<E: AsciaEnvironment, CO: CoordinateType>(polygons: &mut Vec<Polygon<E, CO>>) {
+    polygons.sort_by_key(|p: &Polygon<E, CO>| { parse_vec3_to_morton_code(&((p.poses.v1 + p.poses.v2 + p.poses.v3) / 3.0), 16) });
+}
+
 #[cfg(feature = "termios-controller")]
 pub struct TermiosController<'a, E: AsciaEnvironment>{
     input: RefCell<File>,
@@ -91,7 +127,7 @@ impl<'a, E:AsciaEnvironment> TermiosController<'a, E>{
             termi.c_cc[termios::os::target::VMIN] = 0;
             termi.c_cc[termios::os::target::VTIME] = 0;
 
-            if let Ok(result) = termios::tcsetattr(rawfdstdin, termios::os::target::TCSANOW, &mut termi){
+            if let Ok(_) = termios::tcsetattr(rawfdstdin, termios::os::target::TCSANOW, &mut termi){
                 return Some(TermiosController{
                     input: RefCell::new( unsafe { File::from_raw_fd(rawfdstdin) }),
                     event_fn: Box::new(event_fn),
@@ -151,10 +187,10 @@ impl AsciaRenderedFrame{
                 if rc.c == ' ' {
                     continue;
                 }
-                if !layers.contains_key(&Color8bit::from(rc.color).data){
-                    layers.insert(Color8bit::from(rc.color).data, vec![vec![' '; frame.width]; frame.height]);
+                if !layers.contains_key(&ColorANSI256::from(rc.color).data){
+                    layers.insert(ColorANSI256::from(rc.color).data, vec![vec![' '; frame.width]; frame.height]);
                 }
-                if let Some(cs) = layers.get_mut(&Color8bit::from(rc.color).data){
+                if let Some(cs) = layers.get_mut(&ColorANSI256::from(rc.color).data){
                     cs[y][x] = rc.c;
                 }
             }

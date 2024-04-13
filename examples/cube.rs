@@ -1,23 +1,14 @@
 extern crate ascia;
 
-use std::cell::RefCell;
 use std::f32::consts::PI;
-use std::fs::{File, read};
-use std::{env, io, thread};
-use std::borrow::Cow;
-use std::fmt::format;
-use std::io::{BufRead, BufReader, Read, stdin, Write};
-use std::ops::Add;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::rc::Rc;
+use std::{env, thread};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use ascia::ascia::camera::{NaiveBVH, SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{AsciaEngine, LambertMaterial, LambertWithShadowMaterial, Light, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetCamera, PresetLight, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher};
+use ascia::ascia::core::{AsciaEngine, LambertWithShadowMaterial, ObjectNode, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher};
 use ascia::ascia::lights::PointLight;
-use ascia::ascia::math::{Matrix33, Quaternion, Vec3};
+use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
 use ascia::ascia::util::{AsciaRenderedFrame, available_preset_cameras, move_camera, preset_camera_info, rotate_camera, TermiosController};
 
@@ -31,7 +22,7 @@ fn main() {
 
     let mut engine = AsciaEngine::<PresetAsciaEnvironment>::new(width, height);
 
-    let mut cameras = available_preset_cameras();
+    let cameras = available_preset_cameras();
     let mut now_camera_index = 0usize;
 
     let mut cam_objn = ObjectNode::new("camera");
@@ -76,7 +67,7 @@ fn main() {
     }).make_shared();
     engine.genesis_local.add_child(light_objn);
 
-    let mut capture_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let capture_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
     let mut termios_controller = TermiosController::generate(|c, e|{
         if let Some(camera) = e.genesis_local.child_mut("camera"){
@@ -108,13 +99,13 @@ fn main() {
     loop{
         engine.sync_engine_time();
 
-        termios_controller.input(&mut engine);
+        termios_controller.input(&mut engine).expect("something went wrong with processing input from keyboard");
         engine.update_global_nodes();
 
         if let Ok(data) = engine.render(engine.genesis_global.child("camera").unwrap()){
             let mut mg = capture_flag.lock().unwrap();
             if cfg!(feature = "export") && *mg{
-                AsciaRenderedFrame::generate(&data, &engine.engine_time()).unwrap().save(&format!("./cube_{}.json", engine.engine_time().as_millis()));
+                let _ = AsciaRenderedFrame::generate(&data, &engine.engine_time()).unwrap().save(&format!("./cube_{}.json", engine.engine_time().as_millis()));
                 *mg = false;
             }
         }
@@ -123,7 +114,7 @@ fn main() {
             thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
 
-        let mut dur = last_time.elapsed();
+        let dur = last_time.elapsed();
         println!("dur:{}      ",dur.as_millis());
         println!("fps:{}      ",1000 / dur.as_millis());
         println!("press [W][A][S][D] to move horizontally, [G][H] to move vertically, [I][J][K][L] to roll, [V] to change camera");

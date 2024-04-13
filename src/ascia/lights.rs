@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::marker::PhantomData;
-use std::rc::Rc;
 use crate::ascia::color::ColorRGBf32;
-use crate::ascia::core::{AsciaEnvironment, Global, Light, LightDispatcher, ObjectNode, ObjectNodeAttribute, PresetAsciaEnvironment, PresetLight, PresetObjectNodeAttributeDispatcher};
+use crate::ascia::core::{AsciaEnvironment, Global, Light, LightDispatcher, ObjectNode, ObjectNodeAttribute, PresetLight, PresetObjectNodeAttributeDispatcher};
 use crate::ascia::math::{Vec3};
 
 pub struct PointLight{

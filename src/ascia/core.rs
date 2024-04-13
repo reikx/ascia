@@ -1,15 +1,11 @@
 use std::cell::{RefCell};
-use std::char::{from_digit};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufWriter, stdout, StdoutLock, Write};
 use std::marker::PhantomData;
-use std::ops::Bound::{Excluded, Included};
-use std::ops::Deref;
 use std::rc::{Rc};
-use std::thread;
 use std::time::{Duration, Instant};
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
-use crate::ascia::color::{Color8bit, ColorRGBf32, ColorRGBu8};
+use crate::ascia::color::{ColorANSI256, ColorRGBf32, ColorRGBu8};
 use crate::ascia::lights::PointLight;
 use crate::ascia::math::{AABB3D, Matrix33, Quaternion, Vec2, Vec3};
 
@@ -25,7 +21,7 @@ pub trait AsciaEnvironment where Self: 'static{
 }
 
 pub trait ObjectNodeAttribute<E: AsciaEnvironment + ?Sized>{
-    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self: Sized{
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where E::ObjectNodeAttributes: From<Self>, Self: Sized{
         E::ObjectNodeAttributes::from(self)
     }
 }
@@ -36,33 +32,33 @@ pub trait Material<E: AsciaEnvironment + ?Sized, CA: Camera<E> + ?Sized, RT: Ray
 }
 
 pub trait MaterialCollection<RT: RaytracingTarget<0>>: Default{}
-pub trait MaterialDispatcher<E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>: Camera<E>{
+pub trait MaterialDispatcher<E: AsciaEnvironment + ?Sized, RT: RaytracingTarget<0>>{
     fn calc_color(&self, intersection: &RT::Intersection<'_>, engine: &AsciaEngine<E>, camera_node: &ObjectNode<E, Global>, global_polygons: &Vec<Polygon<E, Global>>) -> (ColorRGBf32, u32);
 }
 
 pub trait Camera<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
     fn render(&self, camera_node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>>;
-    fn make_camera_dispatcher(self) -> E::Cameras where (E::Cameras): From<Self>, Self: Sized{
+    fn make_camera_dispatcher(self) -> E::Cameras where E::Cameras: From<Self>, Self: Sized{
         E::Cameras::from(self)
     }
 }
 pub trait CameraDispatcher<E: AsciaEnvironment + ?Sized>: Default{
     fn render(&self, camera_node: &ObjectNode<E, Global>, engine: &AsciaEngine<E>) -> Vec<Vec<RenderChar>>;
-    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self:Sized{
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where E::ObjectNodeAttributes: From<Self>, Self:Sized{
         E::ObjectNodeAttributes::from(self)
     }
 }
 
 pub trait Light<E: AsciaEnvironment + ?Sized>: ObjectNodeAttribute<E> {
     fn ray(&self, light_node: &ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32;
-    fn make_light_dispatcher(self) -> E::Lights where (E::Lights): From<Self>, Self: Sized{
+    fn make_light_dispatcher(self) -> E::Lights where E::Lights: From<Self>, Self: Sized{
         E::Lights::from(self)
     }
 }
 
 pub trait LightDispatcher<E: AsciaEnvironment + ?Sized>: Default{
     fn ray(&self, light_node: &ObjectNode<E, Global>, to: &Vec3) -> ColorRGBf32;
-    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where (E::ObjectNodeAttributes): From<Self>, Self:Sized{
+    fn make_attribute_enum(self) -> E::ObjectNodeAttributes where E::ObjectNodeAttributes: From<Self>, Self:Sized{
         E::ObjectNodeAttributes::from(self)
     }
 }
@@ -656,7 +652,7 @@ impl<'a, E:AsciaEnvironment, CO: CoordinateType> Iterator for ObjectNodeIter<'a,
             self.prior = None;
             return Some(root);
         }
-        while let Some(mut iter) = self.stack.back_mut(){
+        while let Some(iter) = self.stack.back_mut(){
             if let Some(now) = iter.next(){
                 self.stack.push_back(now.1.children.iter());
                 return Some(now.1);
@@ -695,7 +691,7 @@ impl<E:AsciaEnvironment, C:CoordinateType> ObjectNode<E, C>{
     }
 
     pub fn iter(&self) -> ObjectNodeIter<E, C>{
-        let mut stack = VecDeque::new();
+        let stack = VecDeque::new();
         return ObjectNodeIter{
             prior: Some(self),
             stack: stack
@@ -785,7 +781,7 @@ mod tests{
     use std::f32::consts::PI;
     use std::rc::Rc;
     use crate::ascia::core::{Local, ObjectNode, Polygon, PresetAsciaEnvironment};
-    use crate::ascia::math::{Matrix33, Quaternion, Vec3};
+    use crate::ascia::math::{Quaternion, Vec3};
 
     #[test]
     fn test_generate_global_nodes(){
@@ -987,7 +983,7 @@ impl<'a> Viewport for ViewportStdout<'a>{
         for line in cs{
             out.extend_from_slice(b"\x1B[?25l");
             for rc in line{
-                let color:Color8bit = rc.color.into();
+                let color: ColorANSI256 = rc.color.into();
                 out.extend_from_slice(format!("\x1B[38;5;{}m{}\x1B[m", color.data, rc.c).as_ref());
             }
             out.extend_from_slice(b"\n");
@@ -1027,27 +1023,6 @@ pub struct AsciaEngine<E: AsciaEnvironment + ?Sized>{
 
 impl<E: AsciaEnvironment> AsciaEngine<E>{
     pub fn new(width:usize,height:usize) -> Self{
-        /*
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let mut limits = wgpu::Limits::default();
-        let mut wgpu_daq:Option<(wgpu::Device,wgpu::Queue)> = None;
-        limits.max_bind_groups = 8; */
-        /*
-        limits.max_buffer_size = 268435456u64 * 16u64;
-        limits.max_storage_buffer_binding_size = u32::MAX;
-         */
-        
-        /*
-        if let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())){
-            if let Ok(daq) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor{
-                label: None,
-                required_features: Default::default(),
-                required_limits: limits,
-            }, None)){
-                wgpu_daq = Some(daq);
-            }
-        } */
- 
         return AsciaEngine{
             genesis_local: ObjectNode::new("genesis"),
             genesis_global: ObjectNode{

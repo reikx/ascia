@@ -1,23 +1,17 @@
 extern crate ascia;
 
-use std::cell::{RefCell, RefMut};
 use std::f32::consts::PI;
-use std::fs::{File, read};
-use std::{env, io, thread};
-use std::io::{BufRead, BufReader, Read, stdin};
-use std::ops::Add;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::rc::Rc;
+use std::{env, thread};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use ascia::ascia::camera::{NaiveBVH, SimpleBVHCamera, SimpleCamera};
 use ascia::ascia::color::{ColorRGBf32, ColorRGBu8};
-use ascia::ascia::core::{CParticle, LambertMaterial, LambertWithShadowMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetCamera, PresetLight, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine};
-use ascia::ascia::core::CParticleMode::SPHERE;
+use ascia::ascia::core::{LambertWithShadowMaterial, Local, ObjectNode, ObjectNodeAttributeDispatcher, Polygon, PresetAsciaEnvironment, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine};
 use ascia::ascia::lights::PointLight;
 use ascia::ascia::math::{Matrix33, Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
-use ascia::ascia::util::{available_preset_cameras, move_camera, preset_camera_info, rotate_camera, TermiosController};
+use ascia::ascia::util::{available_preset_cameras, move_camera, preset_camera_info, rotate_camera, sort_polygons_by_morton_code, TermiosController};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -47,8 +41,8 @@ fn main() {
     cube_objn.position.z = 400.0;
     engine.genesis_local.add_child(cube_objn);
 
-    let mut null_container = ObjectNode::new("null container");
-    null_container.position = Vec3{
+    let mut container = ObjectNode::new("container");
+    container.position = Vec3{
         x:0.0,
         y:0.0,
         z:100.0
@@ -81,10 +75,10 @@ fn main() {
             y: 0.0,
             z: 0.0,
         }, 0.0, 10.0);
-        null_container.add_child(pot);
+        container.add_child(pot);
     }
 
-    engine.genesis_local.add_child(null_container);
+    engine.genesis_local.add_child(container);
 
     let light = PointLight{
         color: ColorRGBu8 {
@@ -131,22 +125,22 @@ fn main() {
 
     for _i in 0..65536 {
         engine.sync_engine_time();
-        engine.genesis_local.child_mut("null container").unwrap().direction = Quaternion::new(&Vec3{
+        engine.genesis_local.child_mut("container").unwrap().direction = Quaternion::new(&Vec3{
             x: 0.0,
             y: 1.0,
             z: 0.0,
         }, engine.engine_time().as_secs_f32(), 1.0);
 
 
-        termios_controller.input(&mut engine);
+        termios_controller.input(&mut engine).expect("something went wrong with processing input from keyboard");
         engine.genesis_global = engine.genesis_local.generate_global_nodes();
-        engine.render(engine.genesis_global.child("camera").unwrap());
+        engine.render(engine.genesis_global.child("camera").unwrap()).expect("failed rendering");
 
         if (last_time.elapsed().as_millis() as u64) < (1000 / fps_upper_limit){
             thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
 
-        let mut dur = last_time.elapsed();
+        let dur = last_time.elapsed();
 
         println!("dur:{}      ",dur.as_millis());
         println!("fps:{}      ",1000 / dur.as_millis());
@@ -165,16 +159,16 @@ fn load_teapot(path:&str, material:&PresetPolygonMaterial) -> Vec<Polygon<Preset
     if let Ok(f) = File::open(path){
         let mut reader = BufReader::new(f);
         let mut s = String::new();
-        if let Ok(len) = reader.read_line(&mut s){
+        if let Ok(_) = reader.read_line(&mut s){
             if let Ok(num_polygon) = usize::from_str(&(s.trim())){
                 let mut m = Matrix33{
                     v1: Default::default(),
                     v2: Default::default(),
                     v3: Default::default(),
                 };
-                for i in 0..num_polygon{
+                for _ in 0..num_polygon{
                     s.clear();
-                    reader.read_line(&mut s);
+                    reader.read_line(&mut s).expect("failed to load model");
                     let mut vs = s.split(" ");
 
                     m.v1.x = f32::from_str(vs.next().unwrap().trim()).unwrap();
@@ -182,20 +176,20 @@ fn load_teapot(path:&str, material:&PresetPolygonMaterial) -> Vec<Polygon<Preset
                     m.v1.z = f32::from_str(vs.next().unwrap().trim()).unwrap();
 
                     s.clear();
-                    reader.read_line(&mut s);
+                    reader.read_line(&mut s).expect("failed to load model");
                     let mut vs = s.split(" ");
                     m.v2.x = f32::from_str(vs.next().unwrap().trim()).unwrap();
                     m.v2.y = f32::from_str(vs.next().unwrap().trim()).unwrap();
                     m.v2.z = f32::from_str(vs.next().unwrap().trim()).unwrap();
 
                     s.clear();
-                    reader.read_line(&mut s);
+                    reader.read_line(&mut s).expect("failed to load model");
                     let mut vs = s.split(" ");
                     m.v3.x = f32::from_str(vs.next().unwrap().trim()).unwrap();
                     m.v3.y = f32::from_str(vs.next().unwrap().trim()).unwrap();
                     m.v3.z = f32::from_str(vs.next().unwrap().trim()).unwrap();
 
-                    reader.read_line(&mut s);
+                    reader.read_line(&mut s).expect("failed to load model");
 
                     polygons.push(Polygon{
                         poses: m,
@@ -212,5 +206,6 @@ fn load_teapot(path:&str, material:&PresetPolygonMaterial) -> Vec<Polygon<Preset
             return vec![];
         }
     }
+    sort_polygons_by_morton_code(&mut polygons);
     return polygons;
 }

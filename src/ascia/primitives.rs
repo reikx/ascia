@@ -1,4 +1,4 @@
-use crate::ascia::core::{AsciaEnvironment, Local, Polygon, PresetPolygonMaterial};
+use crate::ascia::core::{AsciaEnvironment, Local, Polygon};
 use crate::ascia::math::{Matrix33, Vec3};
 
 pub struct PrimitiveGenerator{

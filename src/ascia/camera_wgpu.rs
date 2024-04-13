@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::mem;
-use std::rc::Rc;
 use wgpu::{BindGroupDescriptor, BindGroupEntry, BufferDescriptor, Device, Queue, ShaderModule, ShaderModuleDescriptor};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use crate::ascia::camera::{SimpleBVHCamera, SimpleCamera};
@@ -214,7 +213,7 @@ impl GPUMemoryConvertStatic<32> for (Vec3, PointLight) {
 impl<const N: usize, G: GPUMemoryConvertStatic<N>> GPUMemoryConvertStatic<N> for &G {
     #[inline]
     fn convert(&self) -> [u8; N] {
-        return self.convert();
+        return (*self).convert();
     }
 }
 

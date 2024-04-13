@@ -1,22 +1,19 @@
 extern crate ascia;
 
-use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::{env, thread};
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use ascia::ascia::camera::{SimpleBVHCamera, SimpleCamera};
+use ascia::ascia::camera::{SimpleCamera};
 use ascia::ascia::color::ColorRGBf32;
-use ascia::ascia::core::{CameraDispatcher, FlatMaterial, LambertMaterial, Local, Material, ObjectNode, ObjectNodeAttribute, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetCamera, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine};
+use ascia::ascia::core::{LambertMaterial, Local, ObjectNode, ObjectNodeAttributeDispatcher, PresetAsciaEnvironment, PresetPolygonMaterial, PresetObjectNodeAttributeDispatcher, AsciaEngine};
 use ascia::ascia::lights::{PointLight};
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
 use ascia::ascia::util::preset_camera_info;
 
 struct FlashingFloor{
-    size: f32,
     label: String,
     animation_start:Duration,
     animation_duration:Duration,
@@ -60,7 +57,7 @@ impl RollingCube {
     }
 
     fn update(&mut self, root: &mut ObjectNode<PresetAsciaEnvironment, Local>, engine_time: &Duration){
-        let mut self_objn = root.child_mut(&self.label).unwrap();
+        let self_objn = root.child_mut(&self.label).unwrap();
         if *engine_time > self.animation_start + self.animation_duration{
             self.decide_next();
         }
@@ -127,16 +124,15 @@ impl RollingCube {
 }
 
 impl FlashingFloor {
-    fn new(size:f32, label: &str, animation_start: Duration, animation_duration: Duration) -> FlashingFloor{
+    fn new(label: &str, animation_start: Duration, animation_duration: Duration) -> FlashingFloor{
         return FlashingFloor{
-            size,
             label: label.to_string(),
             animation_start: animation_start,
             animation_duration: animation_duration,
         };
     }
     fn update(&mut self, root: &mut ObjectNode<PresetAsciaEnvironment, Local>, engine_time: &Duration) {
-        let mut self_objn = root.child_mut(&self.label).unwrap();
+        let self_objn = root.child_mut(&self.label).unwrap();
         let s = if *engine_time <= self.animation_start{
             1.0
         } else if *engine_time <= self.animation_start + self.animation_duration{
@@ -193,7 +189,7 @@ fn main() {
             z: 1.0,
         }, PI * 0.5, 1.0);
         engine.genesis_local.add_child(f);
-        floors.push_back(FlashingFloor::new(cube_size, &label, engine.engine_time(), Duration::new(5,0)));
+        floors.push_back(FlashingFloor::new(&label, engine.engine_time(), Duration::new(5,0)));
     }
 
 
@@ -251,7 +247,7 @@ fn main() {
                     z: 1.0,
                 }, PI * 0.5, 1.0);
                 engine.genesis_local.add_child(f);
-                floors.push_back(FlashingFloor::new(cube_size, &label, engine.engine_time(), Duration::new(3,0)));
+                floors.push_back(FlashingFloor::new(&label, engine.engine_time(), Duration::new(3,0)));
             }
             c.update(&mut engine.genesis_local, &engine_time);
         }
@@ -265,7 +261,7 @@ fn main() {
         floors.retain(|f|{ f.animation_start + f.animation_duration >= engine_time });
 
         let cube_0_pos = engine.genesis_local.child("cube 0").unwrap().position;
-        let mut camera_root = engine.genesis_local.child_mut("camera root").unwrap();
+        let camera_root = engine.genesis_local.child_mut("camera root").unwrap();
         camera_root.position = Vec3{
             x: cube_0_pos.x,
             y: cube_size * 0.5,
@@ -278,13 +274,13 @@ fn main() {
         }, engine_time.as_secs_f32(), 1.0);
 
         engine.update_global_nodes();
-        engine.render(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap());
+        engine.render(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap()).expect("failed rendering");
 
         if (last_time.elapsed().as_millis() as u64) < (1000 / fps_upper_limit){
             thread::sleep(Duration::from_millis(1000 / fps_upper_limit - last_time.elapsed().as_millis() as u64));
         }
 
-        let mut dur = last_time.elapsed();
+        let dur = last_time.elapsed();
         println!("fps:{}      ",1000 / dur.as_millis());
         println!("current camera: {}     ", preset_camera_info(&engine.genesis_global.child("camera root").unwrap().child("camera").unwrap().attribute));
 

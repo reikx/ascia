@@ -1,16 +1,16 @@
 #[derive(Debug, Copy, Clone)]
-pub struct Color8bit {
+pub struct ColorANSI256 {
     pub data: u8,
 }
 
-impl From<ColorRGBu8> for Color8bit{
+impl From<ColorRGBu8> for ColorANSI256 {
     fn from(value: ColorRGBu8) -> Self{
         if value.r == value.g && value.g == value.b{
-            return Color8bit{
+            return ColorANSI256 {
                 data:232 + value.r / 11
             }
         }
-        return Color8bit{
+        return ColorANSI256 {
             data:16 + (value.r as f64 / (256.0 / 6.0)) as u8 * 36 + (value.g as f64 / (256.0 / 6.0)) as u8 * 6 + (value.b as f64 / (256.0 / 6.0)) as u8
         }
     }
