@@ -10,7 +10,10 @@ use ascia::ascia::core::{AsciaEngine, LambertWithShadowMaterial, ObjectNode, Obj
 use ascia::ascia::lights::PointLight;
 use ascia::ascia::math::{Quaternion, Vec3};
 use ascia::ascia::primitives::PrimitiveGenerator;
-use ascia::ascia::util::{AsciaRenderedFrame, available_preset_cameras, move_camera, preset_camera_info, rotate_camera, TermiosController};
+use ascia::ascia::util::{available_preset_cameras, move_camera, preset_camera_info, rotate_camera, TermiosController};
+
+#[cfg(feature = "export")]
+use ascia::ascia::util::AsciaRenderedFrame;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -102,9 +105,11 @@ fn main() {
         termios_controller.input(&mut engine).expect("something went wrong with processing input from keyboard");
         engine.update_global_nodes();
 
+        
         if let Ok(data) = engine.render(engine.genesis_global.child("camera").unwrap()){
             let mut mg = capture_flag.lock().unwrap();
-            if cfg!(feature = "export") && *mg{
+            #[cfg(feature = "export")]
+            if *mg{
                 let _ = AsciaRenderedFrame::generate(&data, &engine.engine_time()).unwrap().save(&format!("./cube_{}.json", engine.engine_time().as_millis()));
                 *mg = false;
             }
